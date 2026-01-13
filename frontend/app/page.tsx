@@ -10,12 +10,18 @@ import { useTheme } from './providers'
 interface GodViewData {
   symbol: string
   trend_status: number // 1=Long, -1=Short, 2=Both, 0=Wait
+  fw_status?: number   // Wave 1: 1=Long, -1=Short, 2=Both, 0=Wait
   ema_slopes: {
     short: { d: number[], w: number[] }
     mid: { d: number[], w: number[] }
     long: { d: number[], w: number[] }
   }
   signals: {
+    rsi: { d: boolean[], w: boolean[] }
+    macd: { d: boolean[], w: boolean[] }
+    adx: { d: boolean[], w: boolean[] }
+  }
+  fw_signals?: {
     rsi: { d: boolean[], w: boolean[] }
     macd: { d: boolean[], w: boolean[] }
     adx: { d: boolean[], w: boolean[] }
@@ -100,6 +106,13 @@ function TrendBadge({ status }: { status: number }) {
   return <span className="px-2 py-1 rounded bg-gray-600/30 text-gray-300 text-xs font-bold">趋势:待定</span>
 }
 
+function FWBadge({ status }: { status: number }) {
+  if (status === 1) return <span className="px-2 py-1 rounded bg-cyan-600/30 text-cyan-300 text-xs font-bold">反转:多</span>
+  if (status === -1) return <span className="px-2 py-1 rounded bg-orange-600/30 text-orange-300 text-xs font-bold">反转:空</span>
+  if (status === 2) return <span className="px-2 py-1 rounded bg-pink-600/30 text-pink-300 text-xs font-bold">反转:双向</span>
+  return <span className="px-2 py-1 rounded bg-gray-600/30 text-gray-400 text-xs font-bold">反转:待定</span>
+}
+
 function SlopeCell({ slope }: { slope: number }) {
   const { icon, text, color } = getSlopeStatus(slope)
   return (
@@ -110,7 +123,6 @@ function SlopeCell({ slope }: { slope: number }) {
   )
 }
 
-// Card version of SlopeCell (as a div, not td)
 function SlopeCellDiv({ slope, label }: { slope: number, label?: string }) {
   const { icon, text, color } = getSlopeStatus(slope)
   return (
@@ -127,38 +139,6 @@ function SignalIcon({ long, short }: { long: boolean, short: boolean }) {
   if (long) return <span>🟢</span>
   if (short) return <span>🔴</span>
   return <span>⚪</span>
-}
-
-function CurrencyCell({ symbol }: { symbol: string }) {
-  const name = SYMBOL_NAMES[symbol] || symbol
-
-  return (
-    <td className="px-2 py-2">
-      <div className="flex items-center gap-1 flex-wrap">
-        <a
-          href={getTradingViewUrl(symbol, '30')}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="font-medium text-blue-300 hover:text-blue-100 hover:underline cursor-pointer"
-        >
-          {name} {symbol}
-        </a>
-        <div className="flex gap-0.5">
-          {INTERVALS.map((int) => (
-            <a
-              key={int.value}
-              href={getTradingViewUrl(symbol, int.value)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-1.5 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 rounded text-slate-300 hover:text-white transition-colors"
-            >
-              {int.label}
-            </a>
-          ))}
-        </div>
-      </div>
-    </td>
-  )
 }
 
 function TrendPeriodSelector({ selected, onSelect }: { selected: TrendPeriod, onSelect: (p: TrendPeriod) => void }) {
@@ -240,50 +220,115 @@ function ThemeToggle() {
 }
 
 // ==========================================
-// Sub-Components (Table Row & Card)
+// Table Row (Two-Row Layout)
 // ==========================================
 
-function CurrencyRow({ row, trendPeriod }: { row: SnapshotRow, trendPeriod: TrendPeriod }) {
+function CurrencyRows({ row, trendPeriod }: { row: SnapshotRow, trendPeriod: TrendPeriod }) {
   const d = row.data
   const slopes = d.ema_slopes?.[trendPeriod] || d.ema_slopes as unknown as { d: number[], w: number[] }
   const dailySlopes = slopes?.d || [0, 0, 0, 0]
   const weeklySlopes = slopes?.w || [0, 0, 0, 0]
+  const symbol = row.symbol
+  const name = SYMBOL_NAMES[symbol] || symbol
+  const fwSignals = d.fw_signals || { rsi: { d: [false, false], w: [false, false] }, macd: { d: [false, false], w: [false, false] }, adx: { d: [false, false], w: [false, false] } }
 
   return (
-    <tr className="border-t border-slate-700 hover:bg-slate-800/50 transition-colors">
-      <CurrencyCell symbol={row.symbol} />
-      <td className="px-3 py-2 text-center"><TrendBadge status={d.trend_status} /></td>
-      <td className="px-3 py-2 text-center">
-        <SignalIcon long={d.signals.rsi.d[0]} short={d.signals.rsi.d[1]} />
-        <span className="text-[10px] text-slate-500">D</span>
-        <SignalIcon long={d.signals.rsi.w[0]} short={d.signals.rsi.w[1]} />
-        <span className="text-[10px] text-slate-500">W</span>
-      </td>
-      <td className="px-3 py-2 text-center">
-        <SignalIcon long={d.signals.macd.d[0]} short={d.signals.macd.d[1]} />
-        <span className="text-[10px] text-slate-500">D</span>
-        <SignalIcon long={d.signals.macd.w[0]} short={d.signals.macd.w[1]} />
-        <span className="text-[10px] text-slate-500">W</span>
-      </td>
-      <td className="px-3 py-2 text-center">
-        <SignalIcon long={d.signals.adx.d[0]} short={d.signals.adx.d[1]} />
-        <span className="text-[10px] text-slate-500">D</span>
-        <SignalIcon long={d.signals.adx.w[0]} short={d.signals.adx.w[1]} />
-        <span className="text-[10px] text-slate-500">W</span>
-      </td>
-      {/* Daily EMAs */}
-      <SlopeCell slope={dailySlopes[0]} />
-      <SlopeCell slope={dailySlopes[1]} />
-      <SlopeCell slope={dailySlopes[2]} />
-      <SlopeCell slope={dailySlopes[3]} />
-      {/* Weekly EMAs */}
-      <SlopeCell slope={weeklySlopes[0]} />
-      <SlopeCell slope={weeklySlopes[1]} />
-      <SlopeCell slope={weeklySlopes[2]} />
-      <SlopeCell slope={weeklySlopes[3]} />
-    </tr>
+    <>
+      {/* Row 1: Currency Name + Trend Following */}
+      <tr className="border-t border-slate-700 hover:bg-slate-800/50 transition-colors">
+        <td className="px-2 py-2" rowSpan={2}>
+          <div className="flex flex-col">
+            <a
+              href={getTradingViewUrl(symbol, '30')}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-blue-300 hover:text-blue-100 hover:underline cursor-pointer"
+            >
+              {name} {symbol}
+            </a>
+            <div className="flex gap-0.5 mt-1 flex-wrap">
+              {INTERVALS.map((int) => (
+                <a
+                  key={int.value}
+                  href={getTradingViewUrl(symbol, int.value)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-1.5 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 rounded text-slate-300 hover:text-white transition-colors"
+                >
+                  {int.label}
+                </a>
+              ))}
+            </div>
+          </div>
+        </td>
+        <td className="px-2 py-1 text-center text-xs text-teal-400 font-medium">趋势</td>
+        <td className="px-3 py-1 text-center"><TrendBadge status={d.trend_status} /></td>
+        <td className="px-3 py-1 text-center">
+          <SignalIcon long={d.signals.rsi.d[0]} short={d.signals.rsi.d[1]} />
+          <span className="text-[10px] text-slate-500">D</span>
+          <SignalIcon long={d.signals.rsi.w[0]} short={d.signals.rsi.w[1]} />
+          <span className="text-[10px] text-slate-500">W</span>
+        </td>
+        <td className="px-3 py-1 text-center">
+          <SignalIcon long={d.signals.macd.d[0]} short={d.signals.macd.d[1]} />
+          <span className="text-[10px] text-slate-500">D</span>
+          <SignalIcon long={d.signals.macd.w[0]} short={d.signals.macd.w[1]} />
+          <span className="text-[10px] text-slate-500">W</span>
+        </td>
+        <td className="px-3 py-1 text-center">
+          <SignalIcon long={d.signals.adx.d[0]} short={d.signals.adx.d[1]} />
+          <span className="text-[10px] text-slate-500">D</span>
+          <SignalIcon long={d.signals.adx.w[0]} short={d.signals.adx.w[1]} />
+          <span className="text-[10px] text-slate-500">W</span>
+        </td>
+        <SlopeCell slope={dailySlopes[0]} />
+        <SlopeCell slope={dailySlopes[1]} />
+        <SlopeCell slope={dailySlopes[2]} />
+        <SlopeCell slope={dailySlopes[3]} />
+        <SlopeCell slope={weeklySlopes[0]} />
+        <SlopeCell slope={weeklySlopes[1]} />
+        <SlopeCell slope={weeklySlopes[2]} />
+        <SlopeCell slope={weeklySlopes[3]} />
+      </tr>
+      {/* Row 2: Wave 1 (一浪) */}
+      <tr className="border-b border-slate-600 hover:bg-slate-800/30 transition-colors bg-slate-800/20">
+        <td className="px-2 py-1 text-center text-xs text-cyan-400 font-medium">一浪</td>
+        <td className="px-3 py-1 text-center"><FWBadge status={d.fw_status || 0} /></td>
+        <td className="px-3 py-1 text-center">
+          <SignalIcon long={fwSignals.rsi.d[0]} short={fwSignals.rsi.d[1]} />
+          <span className="text-[10px] text-slate-500">D</span>
+          <SignalIcon long={fwSignals.rsi.w[0]} short={fwSignals.rsi.w[1]} />
+          <span className="text-[10px] text-slate-500">W</span>
+        </td>
+        <td className="px-3 py-1 text-center">
+          <SignalIcon long={fwSignals.macd.d[0]} short={fwSignals.macd.d[1]} />
+          <span className="text-[10px] text-slate-500">D</span>
+          <SignalIcon long={fwSignals.macd.w[0]} short={fwSignals.macd.w[1]} />
+          <span className="text-[10px] text-slate-500">W</span>
+        </td>
+        <td className="px-3 py-1 text-center">
+          <SignalIcon long={fwSignals.adx.d[0]} short={fwSignals.adx.d[1]} />
+          <span className="text-[10px] text-slate-500">D</span>
+          <SignalIcon long={fwSignals.adx.w[0]} short={fwSignals.adx.w[1]} />
+          <span className="text-[10px] text-slate-500">W</span>
+        </td>
+        {/* Empty EMA cells for Wave 1 row (same data, grayed out or dash) */}
+        <td className="px-2 py-1 text-center text-xs text-slate-600">-</td>
+        <td className="px-2 py-1 text-center text-xs text-slate-600">-</td>
+        <td className="px-2 py-1 text-center text-xs text-slate-600">-</td>
+        <td className="px-2 py-1 text-center text-xs text-slate-600">-</td>
+        <td className="px-2 py-1 text-center text-xs text-slate-600">-</td>
+        <td className="px-2 py-1 text-center text-xs text-slate-600">-</td>
+        <td className="px-2 py-1 text-center text-xs text-slate-600">-</td>
+        <td className="px-2 py-1 text-center text-xs text-slate-600">-</td>
+      </tr>
+    </>
   )
 }
+
+// ==========================================
+// Card Component
+// ==========================================
 
 function CurrencyCard({ row, trendPeriod }: { row: SnapshotRow, trendPeriod: TrendPeriod }) {
   const d = row.data
@@ -292,11 +337,12 @@ function CurrencyCard({ row, trendPeriod }: { row: SnapshotRow, trendPeriod: Tre
   const weeklySlopes = slopes?.w || [0, 0, 0, 0]
   const symbol = row.symbol
   const name = SYMBOL_NAMES[symbol] || symbol
+  const fwSignals = d.fw_signals || { rsi: { d: [false, false], w: [false, false] }, macd: { d: [false, false], w: [false, false] }, adx: { d: [false, false], w: [false, false] } }
 
   return (
-    <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 flex flex-col gap-4 shadow-lg">
-      {/* Header */}
-      <div className="flex justify-between items-center pb-3 border-b border-slate-800">
+    <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 flex flex-col gap-3 shadow-lg">
+      {/* Header with both badges */}
+      <div className="flex justify-between items-start pb-3 border-b border-slate-800">
         <a
           href={getTradingViewUrl(symbol, '30')}
           target="_blank"
@@ -306,10 +352,14 @@ function CurrencyCard({ row, trendPeriod }: { row: SnapshotRow, trendPeriod: Tre
           <span className="text-lg font-bold text-slate-100">{symbol}</span>
           <span className="text-xs text-slate-400">{name}</span>
         </a>
-        <TrendBadge status={d.trend_status} />
+        <div className="flex flex-col gap-1 items-end">
+          <TrendBadge status={d.trend_status} />
+          <FWBadge status={d.fw_status || 0} />
+        </div>
       </div>
 
-      {/* Signals Grid */}
+      {/* Trend Following Signals */}
+      <div className="text-[10px] text-teal-400 font-medium text-center -mb-1">趋势跟随</div>
       <div className="grid grid-cols-3 gap-2 text-center bg-slate-800/50 rounded-lg p-2">
         <div className="flex flex-col items-center">
           <div className="text-xs text-slate-500 mb-1">RSI</div>
@@ -334,9 +384,34 @@ function CurrencyCard({ row, trendPeriod }: { row: SnapshotRow, trendPeriod: Tre
         </div>
       </div>
 
+      {/* Wave 1 Signals */}
+      <div className="text-[10px] text-cyan-400 font-medium text-center -mb-1">一浪反转</div>
+      <div className="grid grid-cols-3 gap-2 text-center bg-cyan-900/20 rounded-lg p-2 border border-cyan-800/30">
+        <div className="flex flex-col items-center">
+          <div className="text-xs text-slate-500 mb-1">RSI</div>
+          <div className="flex gap-1">
+            <div><SignalIcon long={fwSignals.rsi.d[0]} short={fwSignals.rsi.d[1]} /><span className="text-[10px] text-slate-600 block leading-none">D</span></div>
+            <div><SignalIcon long={fwSignals.rsi.w[0]} short={fwSignals.rsi.w[1]} /><span className="text-[10px] text-slate-600 block leading-none">W</span></div>
+          </div>
+        </div>
+        <div className="flex flex-col items-center border-l border-slate-700/50">
+          <div className="text-xs text-slate-500 mb-1">MACD</div>
+          <div className="flex gap-1">
+            <div><SignalIcon long={fwSignals.macd.d[0]} short={fwSignals.macd.d[1]} /><span className="text-[10px] text-slate-600 block leading-none">D</span></div>
+            <div><SignalIcon long={fwSignals.macd.w[0]} short={fwSignals.macd.w[1]} /><span className="text-[10px] text-slate-600 block leading-none">W</span></div>
+          </div>
+        </div>
+        <div className="flex flex-col items-center border-l border-slate-700/50">
+          <div className="text-xs text-slate-500 mb-1">ADX</div>
+          <div className="flex gap-1">
+            <div><SignalIcon long={fwSignals.adx.d[0]} short={fwSignals.adx.d[1]} /><span className="text-[10px] text-slate-600 block leading-none">D</span></div>
+            <div><SignalIcon long={fwSignals.adx.w[0]} short={fwSignals.adx.w[1]} /><span className="text-[10px] text-slate-600 block leading-none">W</span></div>
+          </div>
+        </div>
+      </div>
+
       {/* Slopes with EMA Labels */}
       <div className="space-y-3 text-sm bg-slate-800/30 rounded-lg p-2">
-        {/* Daily Row */}
         <div>
           <div className="text-xs text-teal-400/70 font-mono mb-1">Daily</div>
           <div className="flex gap-1">
@@ -345,7 +420,6 @@ function CurrencyCard({ row, trendPeriod }: { row: SnapshotRow, trendPeriod: Tre
             ))}
           </div>
         </div>
-        {/* Weekly Row */}
         <div className="border-t border-slate-800/50 pt-2">
           <div className="text-xs text-purple-400/70 font-mono mb-1">Weekly</div>
           <div className="flex gap-1">
@@ -382,7 +456,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [lastUpdate, setLastUpdate] = useState<string | null>(null)
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>('short')
-  const [viewMode, setViewMode] = useState<ViewMode>('card') // Default to card
+  const [viewMode, setViewMode] = useState<ViewMode>('card')
 
   useEffect(() => {
     async function fetchData() {
@@ -397,7 +471,6 @@ export default function Home() {
       }
 
       if (rows && rows.length > 0) {
-        // Sort by symbol order
         const order = Object.keys(SYMBOL_NAMES)
         const sorted = rows.sort((a, b) => order.indexOf(a.symbol) - order.indexOf(b.symbol))
         setData(sorted as SnapshotRow[])
@@ -407,7 +480,6 @@ export default function Home() {
     }
 
     fetchData()
-    // Auto-refresh every 5 minutes
     const interval = setInterval(fetchData, 5 * 60 * 1000)
     return () => clearInterval(interval)
   }, [])
@@ -422,7 +494,6 @@ export default function Home() {
 
   return (
     <main className="p-4 md:p-8 relative min-h-screen">
-      {/* Header with Theme Toggle */}
       <header className="mb-4">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
           <h1 className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent text-center sm:text-left">
@@ -435,13 +506,10 @@ export default function Home() {
         </p>
       </header>
 
-      {/* Controls */}
       <div className="mb-6">
         <TrendPeriodSelector selected={trendPeriod} onSelect={setTrendPeriod} />
         <ViewModeToggle selected={viewMode} onSelect={setViewMode} />
       </div>
-
-      {/* View Mode Switching (State-Based, not Responsive) */}
 
       {/* Table View */}
       {viewMode === 'table' && (
@@ -449,24 +517,25 @@ export default function Home() {
           <table className="w-full text-sm">
             <thead className="bg-slate-800/90 text-slate-200">
               <tr>
-                <th className="px-3 py-3 text-left font-semibold">货币</th>
-                <th className="px-3 py-3 text-center font-semibold">司令部</th>
-                <th className="px-3 py-3 text-center font-semibold text-xs opacity-70">RSI</th>
-                <th className="px-3 py-3 text-center font-semibold text-xs opacity-70">MACD</th>
-                <th className="px-3 py-3 text-center font-semibold text-xs opacity-70">ADX</th>
-                <th className="px-2 py-3 text-center bg-teal-900/40 text-teal-200 text-xs font-mono">20D</th>
-                <th className="px-2 py-3 text-center bg-teal-900/40 text-teal-200 text-xs font-mono">50D</th>
-                <th className="px-2 py-3 text-center bg-teal-900/40 text-teal-200 text-xs font-mono">100D</th>
-                <th className="px-2 py-3 text-center bg-teal-900/40 text-teal-200 text-xs font-mono">200D</th>
-                <th className="px-2 py-3 text-center bg-purple-900/40 text-purple-200 text-xs font-mono">20W</th>
-                <th className="px-2 py-3 text-center bg-purple-900/40 text-purple-200 text-xs font-mono">50W</th>
-                <th className="px-2 py-3 text-center bg-purple-900/40 text-purple-200 text-xs font-mono">100W</th>
-                <th className="px-2 py-3 text-center bg-purple-900/40 text-purple-200 text-xs font-mono">200W</th>
+                <th className="px-3 py-3 text-left font-semibold" rowSpan={2}>货币</th>
+                <th className="px-2 py-2 text-center font-semibold text-xs">引擎</th>
+                <th className="px-3 py-2 text-center font-semibold">司令部</th>
+                <th className="px-3 py-2 text-center font-semibold text-xs opacity-70">RSI</th>
+                <th className="px-3 py-2 text-center font-semibold text-xs opacity-70">MACD</th>
+                <th className="px-3 py-2 text-center font-semibold text-xs opacity-70">ADX</th>
+                <th className="px-2 py-2 text-center bg-teal-900/40 text-teal-200 text-xs font-mono">20D</th>
+                <th className="px-2 py-2 text-center bg-teal-900/40 text-teal-200 text-xs font-mono">50D</th>
+                <th className="px-2 py-2 text-center bg-teal-900/40 text-teal-200 text-xs font-mono">100D</th>
+                <th className="px-2 py-2 text-center bg-teal-900/40 text-teal-200 text-xs font-mono">200D</th>
+                <th className="px-2 py-2 text-center bg-purple-900/40 text-purple-200 text-xs font-mono">20W</th>
+                <th className="px-2 py-2 text-center bg-purple-900/40 text-purple-200 text-xs font-mono">50W</th>
+                <th className="px-2 py-2 text-center bg-purple-900/40 text-purple-200 text-xs font-mono">100W</th>
+                <th className="px-2 py-2 text-center bg-purple-900/40 text-purple-200 text-xs font-mono">200W</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-700/50 bg-slate-900/50">
+            <tbody className="divide-y-0 bg-slate-900/50">
               {data.map((row) => (
-                <CurrencyRow key={row.symbol} row={row} trendPeriod={trendPeriod} />
+                <CurrencyRows key={row.symbol} row={row} trendPeriod={trendPeriod} />
               ))}
             </tbody>
           </table>

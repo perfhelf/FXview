@@ -223,6 +223,286 @@ def calc_adx_signal(high, low, close, length=14):
     return True, True
 
 # ==========================================
+# Wave 1 (First Wave / 一浪) Indicator Functions
+# ==========================================
+
+def calc_rsi_fw_day(series):
+    """RSI First Wave for Daily - uses 6 SMA periods, threshold >= 2."""
+    rsi = calc_rsi(series, length=14)
+    if rsi is None or len(rsi) < 370: return False, False
+    
+    mas = [16, 25, 37, 157, 248, 369]
+    up_count = 0
+    down_count = 0
+    
+    for length in mas:
+        ma = rsi.rolling(window=length).mean()
+        slope = ma.diff()
+        if len(slope) > 0:
+            val = slope.iloc[-1]
+            if pd.isna(val): continue
+            if val >= 0: up_count += 1
+            if val <= 0: down_count += 1
+    
+    return up_count >= 2, down_count >= 2
+
+def calc_rsi_fw_week(series):
+    """RSI First Wave for Weekly - uses 3 SMA periods, threshold >= 1."""
+    rsi = calc_rsi(series, length=14)
+    if rsi is None or len(rsi) < 38: return False, False
+    
+    mas = [16, 25, 37]
+    up_count = 0
+    down_count = 0
+    
+    for length in mas:
+        ma = rsi.rolling(window=length).mean()
+        slope = ma.diff()
+        if len(slope) > 0:
+            val = slope.iloc[-1]
+            if pd.isna(val): continue
+            if val >= 0: up_count += 1
+            if val <= 0: down_count += 1
+    
+    return up_count >= 1, down_count >= 1
+
+def calc_macd_fw(series):
+    """MACD First Wave - returns (dif, dea, up_count, down_count)."""
+    macd_line, signal_line, histogram = calc_macd(series, fast=12, slow=26, signal=9)
+    if macd_line is None or len(macd_line) < 38: return 0, 0, 0, 0
+    
+    dif = macd_line.iloc[-1]
+    dea = signal_line.iloc[-1]
+    
+    if pd.isna(dif) or pd.isna(dea): return 0, 0, 0, 0
+    
+    up_count = 0
+    down_count = 0
+    
+    # DIF slope
+    dif_slope = macd_line.diff().iloc[-1]
+    if not pd.isna(dif_slope):
+        if dif_slope > 0: up_count += 1
+        elif dif_slope < 0: down_count += 1
+    
+    # DEA slope
+    dea_slope = signal_line.diff().iloc[-1]
+    if not pd.isna(dea_slope):
+        if dea_slope > 0: up_count += 1
+        elif dea_slope < 0: down_count += 1
+    
+    # Histogram SMA slopes
+    for length in [16, 25, 37]:
+        ma = histogram.rolling(window=length).mean()
+        slope = ma.diff().iloc[-1]
+        if not pd.isna(slope):
+            if slope > 0: up_count += 1
+            elif slope < 0: down_count += 1
+    
+    return dif, dea, up_count, down_count
+
+def calc_adx_fw(high, low, close, length=14):
+    """ADX First Wave - returns 8 values for position/slope analysis."""
+    tr1 = high - low
+    tr2 = (high - close.shift(1)).abs()
+    tr3 = (low - close.shift(1)).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    
+    atr = tr.rolling(window=length).mean()
+    
+    up_move = high - high.shift(1)
+    down_move = low.shift(1) - low
+    
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+    
+    plus_dm_s = pd.Series(plus_dm, index=high.index)
+    minus_dm_s = pd.Series(minus_dm, index=high.index)
+    
+    plus_di = (plus_dm_s.rolling(window=length).mean() / atr) * 100
+    minus_di = (minus_dm_s.rolling(window=length).mean() / atr) * 100
+    
+    plus_di = plus_di.fillna(0)
+    minus_di = minus_di.fillna(0)
+    
+    if len(plus_di) < 38: return 0, 0, 0, 0, 0, 0, 0, 0
+    
+    # Calculate SMAs
+    p_mas = [plus_di.rolling(window=l).mean() for l in [16, 25, 37]]
+    m_mas = [minus_di.rolling(window=l).mean() for l in [16, 25, 37]]
+    
+    p_ma_vals = [ma.iloc[-1] for ma in p_mas]
+    m_ma_vals = [ma.iloc[-1] for ma in m_mas]
+    
+    if any(pd.isna(p_ma_vals)) or any(pd.isna(m_ma_vals)): return 0, 0, 0, 0, 0, 0, 0, 0
+    
+    # Slope counts
+    p_up_count = 0
+    p_down_count = 0
+    m_up_count = 0
+    m_down_count = 0
+    
+    for ma in p_mas:
+        slope = ma.diff().iloc[-1]
+        if not pd.isna(slope):
+            if slope >= 0: p_up_count += 1
+            if slope <= 0: p_down_count += 1
+    
+    for ma in m_mas:
+        slope = ma.diff().iloc[-1]
+        if not pd.isna(slope):
+            if slope >= 0: m_up_count += 1
+            if slope <= 0: m_down_count += 1
+    
+    # Position counts (how many times each p_ma is below/above each m_ma)
+    p_below_count = sum(1 for p in p_ma_vals for m in m_ma_vals if p < m)
+    p_above_count = sum(1 for p in p_ma_vals for m in m_ma_vals if p > m)
+    m_below_count = sum(1 for m in m_ma_vals for p in p_ma_vals if m < p)
+    m_above_count = sum(1 for m in m_ma_vals for p in p_ma_vals if m > p)
+    
+    return p_up_count, p_down_count, m_up_count, m_down_count, p_below_count, p_above_count, m_below_count, m_above_count
+
+def calc_fw_week_signals(w_close, w_high, w_low):
+    """Calculate Weekly First Wave signals."""
+    # RSI Week
+    rsi_l, rsi_s = calc_rsi_fw_week(w_close)
+    
+    # MACD Week
+    dif, dea, up, down = calc_macd_fw(w_close)
+    both_below = dif < 0 and dea < 0
+    both_above = dif > 0 and dea > 0
+    cross_zero = (dif > 0 and dea < 0) or (dif < 0 and dea > 0) or dif == 0 or dea == 0
+    
+    macd_l, macd_s, macd_w = False, False, False
+    if both_below and up >= 3:
+        macd_l = True
+    elif both_above and down >= 3:
+        macd_s = True
+    elif cross_zero and up >= 3:
+        macd_l = True
+    elif cross_zero and down >= 3:
+        macd_s = True
+    elif both_above and up >= 3:
+        macd_w = True
+    elif both_below and down >= 3:
+        macd_w = True
+    
+    # ADX Week
+    p_up, p_down, m_up, m_down, p_b, p_a, m_b, m_a = calc_adx_fw(w_high, w_low, w_close, 14)
+    adx_l, adx_s, adx_b, adx_w = False, False, False, False
+    
+    if p_up >= 1 and p_b >= 6:
+        adx_l = True
+    elif m_up >= 1 and m_b >= 6:
+        adx_s = True
+    elif p_up >= 1 and m_up >= 2:
+        adx_b = True
+    elif p_down >= 1 and m_down >= 2:
+        adx_b = True
+    elif p_up == 3 and p_a >= 6:
+        if p_down >= 1:
+            adx_s = True
+        else:
+            adx_w = True
+    elif m_up == 3 and m_a >= 6:
+        if m_down >= 1:
+            adx_l = True
+        else:
+            adx_w = True
+    
+    return rsi_l, rsi_s, macd_l, macd_s, macd_w, adx_l, adx_s, adx_b, adx_w
+
+def calc_fw_aggregation(d_close, d_high, d_low, w_rsi_l, w_rsi_s, w_macd_l, w_macd_s, w_macd_w, w_adx_l, w_adx_s, w_adx_b, w_adx_w):
+    """First Wave Commander aggregation logic."""
+    # 1. RSI Day
+    rsi_d_l, rsi_d_s = calc_rsi_fw_day(d_close)
+    rsi_w_l, rsi_w_s = w_rsi_l, w_rsi_s
+    
+    rsi_d_both = rsi_d_l and rsi_d_s
+    rsi_w_both = rsi_w_l and rsi_w_s
+    
+    rsi_gen_l, rsi_gen_s, rsi_gen_wait = False, False, False
+    d_only_l = rsi_d_l and not rsi_d_s
+    d_only_s = rsi_d_s and not rsi_d_l
+    w_only_l = rsi_w_l and not rsi_w_s
+    w_only_s = rsi_w_s and not rsi_w_l
+    
+    if d_only_l and w_only_l: rsi_gen_l = True
+    elif d_only_s and w_only_s: rsi_gen_s = True
+    elif rsi_d_both and w_only_l: rsi_gen_l = True
+    elif rsi_d_both and w_only_s: rsi_gen_s = True
+    elif d_only_l and rsi_w_both: rsi_gen_l = True
+    elif d_only_s and rsi_w_both: rsi_gen_s = True
+    elif d_only_l and w_only_s: rsi_gen_wait = True
+    elif d_only_s and w_only_l: rsi_gen_wait = True
+    elif rsi_d_both and rsi_w_both: rsi_gen_l, rsi_gen_s = True, True
+    
+    # 2. MACD Day
+    dif_d, dea_d, up_d, down_d = calc_macd_fw(d_close)
+    macd_d_l = up_d >= 3
+    macd_d_s = down_d >= 3
+    macd_d_wait = not macd_d_l and not macd_d_s
+    
+    macd_w_l, macd_w_s, macd_w_wait = w_macd_l, w_macd_s, w_macd_w
+    
+    macd_gen_l, macd_gen_s, macd_gen_b, macd_gen_wait = False, False, False, False
+    if macd_w_wait:
+        macd_gen_wait = True
+    elif macd_d_l and macd_w_l: macd_gen_l = True
+    elif macd_d_s and macd_w_s: macd_gen_s = True
+    elif macd_d_l and macd_w_s: macd_gen_b = True
+    elif macd_d_s and macd_w_l: macd_gen_b = True
+    elif macd_d_wait and macd_w_l: macd_gen_l = True
+    elif macd_d_wait and macd_w_s: macd_gen_s = True
+    
+    # 3. ADX Day
+    p_up_d, p_down_d, m_up_d, m_down_d, p_below_d, p_above_d, m_below_d, m_above_d = calc_adx_fw(d_high, d_low, d_close, 14)
+    adx_d_l, adx_d_s, adx_d_b, adx_d_wait = False, False, False, False
+    
+    if p_up_d >= 1 and p_below_d >= 6: adx_d_l = True
+    elif m_up_d >= 1 and m_below_d >= 6: adx_d_s = True
+    elif p_up_d >= 1 and m_up_d >= 2: adx_d_b = True
+    elif p_down_d >= 1 and m_down_d >= 2: adx_d_b = True
+    elif p_up_d >= 1 and p_above_d >= 6: adx_d_wait = True
+    elif m_up_d >= 2 and m_above_d >= 6: adx_d_wait = True
+    
+    adx_w_l, adx_w_s, adx_w_b, adx_w_wait = w_adx_l, w_adx_s, w_adx_b, w_adx_w
+    
+    adx_gen_l, adx_gen_s, adx_gen_b, adx_gen_wait = False, False, False, False
+    if adx_d_wait or adx_w_wait: adx_gen_wait = True
+    elif adx_d_l and adx_w_l: adx_gen_l = True
+    elif adx_d_s and adx_w_s: adx_gen_s = True
+    elif adx_d_l and adx_w_s: adx_gen_b = True
+    elif adx_d_s and adx_w_l: adx_gen_b = True
+    elif adx_d_b and adx_w_l: adx_gen_l = True
+    elif adx_d_b and adx_w_s: adx_gen_s = True
+    elif adx_d_l and adx_w_b: adx_gen_l = True
+    elif adx_d_s and adx_w_b: adx_gen_s = True
+    elif adx_d_b and adx_w_b: adx_gen_b = True
+    
+    # 4. Commander
+    fw_l, fw_s = False, False
+    if rsi_gen_wait or macd_gen_wait or adx_gen_wait:
+        fw_l, fw_s = False, False
+    else:
+        # Long condition
+        rsi_supp_l = rsi_gen_l or (rsi_gen_l and rsi_gen_s)
+        if rsi_supp_l and macd_gen_l and (adx_gen_l or adx_gen_b):
+            fw_l = True
+        
+        # Short condition
+        rsi_supp_s = rsi_gen_s or (rsi_gen_l and rsi_gen_s)
+        if rsi_supp_s and macd_gen_s and (adx_gen_s or adx_gen_b):
+            fw_s = True
+    
+    # Return status: 1=Long, -1=Short, 2=Both, 0=Wait
+    if fw_l and fw_s: return 2, [rsi_d_l, rsi_d_s], [rsi_w_l, rsi_w_s], [macd_d_l, macd_d_s], [macd_w_l, macd_w_s], [adx_d_l, adx_d_s], [adx_w_l, adx_w_s]
+    if fw_l: return 1, [rsi_d_l, rsi_d_s], [rsi_w_l, rsi_w_s], [macd_d_l, macd_d_s], [macd_w_l, macd_w_s], [adx_d_l, adx_d_s], [adx_w_l, adx_w_s]
+    if fw_s: return -1, [rsi_d_l, rsi_d_s], [rsi_w_l, rsi_w_s], [macd_d_l, macd_d_s], [macd_w_l, macd_w_s], [adx_d_l, adx_d_s], [adx_w_l, adx_w_s]
+    return 0, [rsi_d_l, rsi_d_s], [rsi_w_l, rsi_w_s], [macd_d_l, macd_d_s], [macd_w_l, macd_w_s], [adx_d_l, adx_d_s], [adx_w_l, adx_w_s]
+
+
+# ==========================================
 # Main Execution
 # ==========================================
 def main():
@@ -322,6 +602,10 @@ def main():
              ema_w_mid = [0, 0, 0, 0]
              ema_w_long = [0, 0, 0, 0]
              wrsi_l=False; wrsi_s=False; wmacd_l=False; wmacd_s=False; wadx_l=False; wadx_s=False
+             # Wave 1 Weekly - defaults when insufficient data
+             fw_wrsi_l=False; fw_wrsi_s=False
+             fw_wmacd_l=False; fw_wmacd_s=False; fw_wmacd_w=False
+             fw_wadx_l=False; fw_wadx_s=False; fw_wadx_b=False; fw_wadx_w=False
         else:
              ema_w_short = calc_slopes_for_period(w_close, 20)
              ema_w_mid = calc_slopes_for_period(w_close, 50)
@@ -330,10 +614,13 @@ def main():
              wrsi_l, wrsi_s = calc_rsi_votes(w_close, 3)
              wmacd_l, wmacd_s = calc_macd_signal(w_close)
              wadx_l, wadx_s = calc_adx_signal(w_high, w_low, w_close, 14)
+             
+             # Wave 1 Weekly signals
+             fw_wrsi_l, fw_wrsi_s, fw_wmacd_l, fw_wmacd_s, fw_wmacd_w, fw_wadx_l, fw_wadx_s, fw_wadx_b, fw_wadx_w = calc_fw_week_signals(w_close, w_high, w_low)
 
         # Monthly Data - removed from UI due to insufficient Yahoo Finance data
 
-        # Aggregation Logic
+        # Aggregation Logic (Trend Following)
         rsi_gen_long = rsi_l and wrsi_l and not rsi_s and not wrsi_s
         rsi_gen_short = rsi_s and wrsi_s and not rsi_l and not wrsi_l
         rsi_gen_wait = not rsi_l and not rsi_s and not wrsi_l and not wrsi_s
@@ -368,9 +655,18 @@ def main():
         elif trend_long: trend_status = 1
         elif trend_short: trend_status = -1
         
+        # Wave 1 (First Wave) Aggregation
+        fw_status, fw_rsi_d, fw_rsi_w, fw_macd_d, fw_macd_w, fw_adx_d, fw_adx_w = calc_fw_aggregation(
+            s_close, s_high, s_low,
+            fw_wrsi_l, fw_wrsi_s,
+            fw_wmacd_l, fw_wmacd_s, fw_wmacd_w,
+            fw_wadx_l, fw_wadx_s, fw_wadx_b, fw_wadx_w
+        )
+        
         payload = {
             "symbol": symbol,
             "trend_status": trend_status,
+            "fw_status": fw_status,
             "ema_slopes": {
                 "short": {"d": ema_d_short, "w": ema_w_short},
                 "mid": {"d": ema_d_mid, "w": ema_w_mid},
@@ -380,6 +676,11 @@ def main():
                 "rsi": {"d": [rsi_l, rsi_s], "w": [wrsi_l, wrsi_s]},
                 "macd": {"d": [macd_l, macd_s], "w": [wmacd_l, wmacd_s]},
                 "adx": {"d": [adx_l, adx_s], "w": [wadx_l, wadx_s]}
+            },
+            "fw_signals": {
+                "rsi": {"d": fw_rsi_d, "w": fw_rsi_w},
+                "macd": {"d": fw_macd_d, "w": fw_macd_w},
+                "adx": {"d": fw_adx_d, "w": fw_adx_w}
             }
         }
         
