@@ -155,8 +155,8 @@ function TrendPeriodSelector({ selected, onSelect }: { selected: TrendPeriod, on
           key={tp.key}
           onClick={() => onSelect(tp.key)}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${selected === tp.key
-              ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
-              : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+            ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
+            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
             }`}
         >
           {tp.label}
@@ -315,6 +315,7 @@ export default function Home() {
       <footer className="mt-12 text-center text-sm text-slate-500 space-y-2 pb-8">
         <p>本站所有指数算法由太囍倾情提供</p>
         <p>版权所有@太囍＆鲲侯</p>
+        <p className="text-xs opacity-50 pt-2">Data Source: Yahoo Finance</p>
       </footer>
     </main>
   )
