@@ -175,15 +175,28 @@ function ThemeToggle() {
 
   if (!mounted) return null
 
+  const options = [
+    { key: 'light' as const, icon: '☀️', label: 'Light' },
+    { key: 'dark' as const, icon: '🌙', label: 'Dark' },
+    { key: 'system' as const, icon: '🖥️', label: 'Auto' },
+  ]
+
   return (
-    <button
-      onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-      className="absolute top-4 right-4 p-2 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors shadow-sm"
-      aria-label="Toggle Theme"
-      title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-    >
-      {theme === 'dark' ? '☀️' : '🌙'}
-    </button>
+    <div className="absolute top-4 right-4 flex rounded-lg overflow-hidden shadow-sm border border-slate-300 dark:border-slate-700">
+      {options.map((opt) => (
+        <button
+          key={opt.key}
+          onClick={() => setTheme(opt.key)}
+          className={`px-3 py-1.5 text-sm font-medium transition-colors ${theme === opt.key
+              ? 'bg-blue-600 text-white'
+              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+            }`}
+          aria-label={opt.label}
+        >
+          {opt.icon} {opt.label}
+        </button>
+      ))}
+    </div>
   )
 }
 
