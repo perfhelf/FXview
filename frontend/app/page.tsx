@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useTheme } from './providers'
 
+// ==========================================
+// Types
+// ==========================================
 interface GodViewData {
   symbol: string
   trend_status: number // 1=Long, -1=Short, 2=Both, 0=Wait
@@ -24,22 +28,17 @@ interface SnapshotRow {
   data: GodViewData
 }
 
+type TrendPeriod = 'short' | 'mid' | 'long'
+
+// ==========================================
+// Constants
+// ==========================================
 const SYMBOL_NAMES: Record<string, string> = {
-  USD: '美元',
-  EUR: '欧元',
-  GBP: '英镑',
-  JPY: '日元',
-  AUD: '澳元',
-  CAD: '加元',
-  NZD: '纽元',
-  CHF: '瑞郎',
-  SGD: '新元',
-  MXN: '比索',
-  SEK: '瑞典',
-  NOK: '挪威',
+  USD: '美元', EUR: '欧元', GBP: '英镑', JPY: '日元',
+  AUD: '澳元', CAD: '加元', NZD: '纽元', CHF: '瑞郎',
+  SGD: '新元', MXN: '比索', SEK: '瑞典', NOK: '挪威',
 }
 
-// TradingView formulas for each currency index (from TAIXI 指数.txt)
 const TV_FORMULAS: Record<string, string> = {
   AUD: 'FX:AUDUSD/0.66047+FX:USDCAD*FX:AUDUSD/0.90476+FX:AUDUSD/FX:EURUSD/0.61763+FX:AUDUSD/FX:GBPUSD/0.53138+FX:AUDUSD*FX:USDJPY/94.23133',
   CAD: '1/FX:USDCAD/0.72965+1/(FX:USDCAD*FX:AUDUSD)/1.1055+1/(FX:EURUSD*FX:USDCAD)/0.68211+1/(FX:GBPUSD*FX:USDCAD)/0.58657+FX:USDJPY/FX:USDCAD/104.165',
@@ -47,7 +46,7 @@ const TV_FORMULAS: Record<string, string> = {
   JPY: '1/FX:USDJPY/0.00703+1/(FX:USDJPY*FX:AUDUSD)/0.01063+FX:USDCAD/FX:USDJPY/0.00963+1/(FX:USDJPY*FX:GBPUSD)/0.00566+1/(FX:USDJPY*FX:EURUSD)/0.00656',
   EUR: 'FX:EURUSD/1.06973+FX:EURUSD/FX:AUDUSD/1.62021+FX:EURUSD*FX:USDCAD/1.46625+FX:EURUSD/FX:GBPUSD/0.85959+FX:EURUSD*FX:USDJPY/152.95167',
   GBP: 'FX:GBPUSD/1.24401+FX:GBPUSD/FX:AUDUSD/1.88737+FX:GBPUSD*FX:USDCAD/1.70749+FX:GBPUSD/FX:EURUSD/1.16423+FX:GBPUSD*FX:USDJPY/178.228',
-  USD: 'TVC:DXY', // Use DXY directly
+  USD: 'TVC:DXY',
   NZD: 'FX:NZDUSD/0.60851+FX:USDCAD*FX:NZDUSD/0.83363+FX:NZDUSD/FX:EURUSD/0.56898+FX:NZDUSD/FX:GBPUSD/0.48991+FX:USDJPY*FX:NZDUSD/86.76033',
   SGD: '1/OANDA:USDSGD/0.74527+FX:USDCAD/OANDA:USDSGD/1.02258+1/(FX:EURUSD*OANDA:USDSGD)/0.69684+1/(OANDA:USDSGD*FX:GBPUSD)/0.59898+FX:USDJPY/OANDA:USDSGD/106.60933',
   MXN: '1/FX:USDMXN/0.05273+FX:USDCAD/FX:USDMXN/0.07218+1/(FX:EURUSD*FX:USDMXN)/0.0492+1/(FX:USDMXN*FX:GBPUSD)/0.04234+FX:USDJPY/FX:USDMXN/7.52667',
@@ -56,12 +55,8 @@ const TV_FORMULAS: Record<string, string> = {
 }
 
 const INTERVALS = [
-  { label: '1H', value: '60' },
-  { label: '2H', value: '120' },
-  { label: '4H', value: '240' },
-  { label: '日', value: 'D' },
-  { label: '周', value: 'W' },
-  { label: '月', value: 'M' },
+  { label: '1H', value: '60' }, { label: '2H', value: '120' }, { label: '4H', value: '240' },
+  { label: '日', value: 'D' }, { label: '周', value: 'W' }, { label: '月', value: 'M' },
 ]
 
 const TREND_PERIODS = [
@@ -70,16 +65,17 @@ const TREND_PERIODS = [
   { key: 'long', label: '长期趋势', period: 90 },
 ] as const
 
-type TrendPeriod = 'short' | 'mid' | 'long'
+const THRESHOLDS = { flat: 0.001, weak: 0.003, healthy: 0.005 }
 
+// ==========================================
+// Helper Components & Functions
+// ==========================================
 function getTradingViewUrl(symbol: string, interval: string = '30') {
   const formula = TV_FORMULAS[symbol]
   if (!formula) return '#'
   const encodedSymbol = encodeURIComponent(formula)
   return `https://cn.tradingview.com/chart/?symbol=${encodedSymbol}&interval=${interval}`
 }
-
-const THRESHOLDS = { flat: 0.001, weak: 0.003, healthy: 0.005 }
 
 function getSlopeStatus(slope: number) {
   const abs = Math.abs(slope)
@@ -171,6 +167,29 @@ function TrendPeriodSelector({ selected, onSelect }: { selected: TrendPeriod, on
   )
 }
 
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => { setMounted(true) }, [])
+
+  if (!mounted) return null
+
+  return (
+    <button
+      onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+      className="absolute top-4 right-4 p-2 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors shadow-sm"
+      aria-label="Toggle Theme"
+      title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+    >
+      {theme === 'dark' ? '☀️' : '🌙'}
+    </button>
+  )
+}
+
+// ==========================================
+// Main Component
+// ==========================================
 export default function Home() {
   const [data, setData] = useState<SnapshotRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -214,10 +233,11 @@ export default function Home() {
   }
 
   return (
-    <main className="p-4 md:p-8">
+    <main className="p-4 md:p-8 relative min-h-screen">
+      <ThemeToggle />
       <header className="mb-4 text-center">
         <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
-          🌐 FXView · 全球汇率上帝视角
+          🌐 鲲侯FXView · 全球汇率上帝视角
         </h1>
         <p className="text-sm text-slate-400 mt-2">
           Last Update: {lastUpdate ? new Date(lastUpdate).toLocaleString() : 'N/A'}
@@ -292,9 +312,9 @@ export default function Home() {
         </table>
       </div>
 
-      <footer className="mt-8 text-center text-xs text-slate-500">
-        <p>Powered by Yahoo Finance + Supabase + Vercel</p>
-        <p>Data refreshed every hour via GitHub Actions</p>
+      <footer className="mt-12 text-center text-sm text-slate-500 space-y-2 pb-8">
+        <p>本站所有指数算法由太囍倾情提供</p>
+        <p>版权所有@太囍＆鲲侯</p>
       </footer>
     </main>
   )
