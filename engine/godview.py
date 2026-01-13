@@ -665,6 +665,7 @@ def main():
         
         payload = {
             "symbol": symbol,
+            "last_update": datetime.utcnow().isoformat() + "Z", # Explicit UTC timestamp in payload
             "trend_status": trend_status,
             "fw_status": fw_status,
             "ema_slopes": {
@@ -705,7 +706,7 @@ def main():
             sb.table('godview_snapshot').upsert({
                 'symbol': sym, 
                 'data': clean_data,
-                'updated_at': datetime.utcnow().isoformat()
+                'updated_at': datetime.utcnow().isoformat() + "Z" # Explicit UTC for SQL column
             }).execute()
         print("Done.")
     else:

@@ -11,6 +11,7 @@ interface GodViewData {
   symbol: string
   trend_status: number // 1=Long, -1=Short, 2=Both, 0=Wait
   fw_status?: number   // Wave 1: 1=Long, -1=Short, 2=Both, 0=Wait
+  last_update?: string // Timestamp from backend payload (preferred source)
   ema_slopes: {
     short: { d: number[], w: number[] }
     mid: { d: number[], w: number[] }
@@ -149,8 +150,8 @@ function TrendPeriodSelector({ selected, onSelect }: { selected: TrendPeriod, on
           key={tp.key}
           onClick={() => onSelect(tp.key)}
           className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${selected === tp.key
-              ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
-              : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+            ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
+            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
             }`}
         >
           {tp.label}
@@ -167,8 +168,8 @@ function ViewModeToggle({ selected, onSelect }: { selected: ViewMode, onSelect: 
       <button
         onClick={() => onSelect('card')}
         className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1 ${selected === 'card'
-            ? 'bg-teal-600 text-white'
-            : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+          ? 'bg-teal-600 text-white'
+          : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
           }`}
       >
         📇 信息卡
@@ -176,8 +177,8 @@ function ViewModeToggle({ selected, onSelect }: { selected: ViewMode, onSelect: 
       <button
         onClick={() => onSelect('table')}
         className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1 ${selected === 'table'
-            ? 'bg-teal-600 text-white'
-            : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+          ? 'bg-teal-600 text-white'
+          : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
           }`}
       >
         📊 表格
@@ -207,8 +208,8 @@ function ThemeToggle() {
           key={opt.key}
           onClick={() => setTheme(opt.key)}
           className={`px-2 py-1 sm:px-3 sm:py-1.5 text-sm font-medium transition-colors ${theme === opt.key
-              ? 'bg-blue-600 text-white'
-              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+            ? 'bg-blue-600 text-white'
+            : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
             }`}
           aria-label={opt.key}
         >
@@ -474,7 +475,9 @@ export default function Home() {
         const order = Object.keys(SYMBOL_NAMES)
         const sorted = rows.sort((a, b) => order.indexOf(a.symbol) - order.indexOf(b.symbol))
         setData(sorted as SnapshotRow[])
-        setLastUpdate(rows[0]?.updated_at)
+        // Prefer explicit last_update from payload (JSON), fallback to SQL row updated_at
+        const payloadTime = rows[0]?.data?.last_update
+        setLastUpdate(payloadTime || rows[0]?.updated_at)
       }
       setLoading(false)
     }
