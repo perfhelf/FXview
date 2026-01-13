@@ -5,8 +5,14 @@ import { Inter } from 'next/font/google'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'FXView · GodView',
-  description: 'Global Currency Strength Dashboard',
+  title: '鲲侯FXView · 全球汇率上帝视角',
+  description: '提供全球汇率实时分析，集成趋势跟随、一浪反转、流动性猎杀三大引擎。通过上帝视角洞察 RSI、MACD、ADX 多周期信号，助您精准把握市场脉搏。',
+  keywords: 'FXView, 鲲侯, 汇率分析, 外汇交易, 趋势跟随, 一浪反转, 上帝视角, 交易信号, RSI, MACD, ADX, 全球汇率',
+  openGraph: {
+    title: '鲲侯FXView · 全球汇率上帝视角',
+    description: '提供全球汇率实时分析，集成趋势跟随、一浪反转、流动性猎杀三大引擎。',
+    type: 'website',
+  },
 }
 
 import { ThemeProvider } from './providers'
