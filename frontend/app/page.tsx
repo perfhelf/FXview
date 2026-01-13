@@ -7,9 +7,9 @@ interface GodViewData {
   symbol: string
   trend_status: number // 1=Long, -1=Short, 2=Both, 0=Wait
   ema_slopes: {
-    d: number[]
-    w: number[]
-    m: number[]
+    short: { d: number[], w: number[] }
+    mid: { d: number[], w: number[] }
+    long: { d: number[], w: number[] }
   }
   signals: {
     rsi: { d: boolean[], w: boolean[] }
@@ -63,6 +63,14 @@ const INTERVALS = [
   { label: '周', value: 'W' },
   { label: '月', value: 'M' },
 ]
+
+const TREND_PERIODS = [
+  { key: 'short', label: '短期趋势', period: 20 },
+  { key: 'mid', label: '中期趋势', period: 50 },
+  { key: 'long', label: '长期趋势', period: 90 },
+] as const
+
+type TrendPeriod = 'short' | 'mid' | 'long'
 
 function getTradingViewUrl(symbol: string, interval: string = '30') {
   const formula = TV_FORMULAS[symbol]
@@ -143,10 +151,31 @@ function CurrencyCell({ symbol }: { symbol: string }) {
   )
 }
 
+function TrendPeriodSelector({ selected, onSelect }: { selected: TrendPeriod, onSelect: (p: TrendPeriod) => void }) {
+  return (
+    <div className="flex justify-center gap-2 mb-4">
+      {TREND_PERIODS.map((tp) => (
+        <button
+          key={tp.key}
+          onClick={() => onSelect(tp.key)}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${selected === tp.key
+              ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
+              : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+            }`}
+        >
+          {tp.label}
+          <span className="ml-1 text-xs opacity-70">({tp.period})</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export default function Home() {
   const [data, setData] = useState<SnapshotRow[]>([])
   const [loading, setLoading] = useState(true)
   const [lastUpdate, setLastUpdate] = useState<string | null>(null)
+  const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>('short')
 
   useEffect(() => {
     async function fetchData() {
@@ -186,7 +215,7 @@ export default function Home() {
 
   return (
     <main className="p-4 md:p-8">
-      <header className="mb-6 text-center">
+      <header className="mb-4 text-center">
         <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
           🌐 FXView · 全球汇率上帝视角
         </h1>
@@ -194,6 +223,8 @@ export default function Home() {
           Last Update: {lastUpdate ? new Date(lastUpdate).toLocaleString() : 'N/A'}
         </p>
       </header>
+
+      <TrendPeriodSelector selected={trendPeriod} onSelect={setTrendPeriod} />
 
       <div className="overflow-x-auto rounded-lg border border-slate-700">
         <table className="w-full text-sm">
@@ -217,6 +248,11 @@ export default function Home() {
           <tbody>
             {data.map((row) => {
               const d = row.data
+              // Get slopes for selected trend period, with fallback for old data structure
+              const slopes = d.ema_slopes?.[trendPeriod] || d.ema_slopes as unknown as { d: number[], w: number[] }
+              const dailySlopes = slopes?.d || [0, 0, 0, 0]
+              const weeklySlopes = slopes?.w || [0, 0, 0, 0]
+
               return (
                 <tr key={row.symbol} className="border-t border-slate-700 hover:bg-slate-800/50 transition-colors">
                   <CurrencyCell symbol={row.symbol} />
@@ -240,15 +276,15 @@ export default function Home() {
                     <span className="text-[10px] text-slate-500">W</span>
                   </td>
                   {/* Daily EMAs */}
-                  <SlopeCell slope={d.ema_slopes.d[0]} />
-                  <SlopeCell slope={d.ema_slopes.d[1]} />
-                  <SlopeCell slope={d.ema_slopes.d[2]} />
-                  <SlopeCell slope={d.ema_slopes.d[3]} />
+                  <SlopeCell slope={dailySlopes[0]} />
+                  <SlopeCell slope={dailySlopes[1]} />
+                  <SlopeCell slope={dailySlopes[2]} />
+                  <SlopeCell slope={dailySlopes[3]} />
                   {/* Weekly EMAs */}
-                  <SlopeCell slope={d.ema_slopes.w[0]} />
-                  <SlopeCell slope={d.ema_slopes.w[1]} />
-                  <SlopeCell slope={d.ema_slopes.w[2]} />
-                  <SlopeCell slope={d.ema_slopes.w[3]} />
+                  <SlopeCell slope={weeklySlopes[0]} />
+                  <SlopeCell slope={weeklySlopes[1]} />
+                  <SlopeCell slope={weeklySlopes[2]} />
+                  <SlopeCell slope={weeklySlopes[3]} />
                 </tr>
               )
             })}

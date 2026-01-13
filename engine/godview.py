@@ -293,11 +293,19 @@ def main():
             print(f"Not enough data for {symbol}")
             continue
 
-        # EMA Slopes (Daily) - using pure pandas calc_ema
-        ema20d = calc_sma_slope_v2(calc_ema(s_close, 20), 50).iloc[-1]
-        ema50d = calc_sma_slope_v2(calc_ema(s_close, 50), 50).iloc[-1]
-        ema100d = calc_sma_slope_v2(calc_ema(s_close, 100), 50).iloc[-1]
-        ema200d = calc_sma_slope_v2(calc_ema(s_close, 200), 50).iloc[-1]
+        # EMA Slopes (Daily) - Calculate for all three periods: short(20), mid(50), long(90)
+        def calc_slopes_for_period(close_series, slope_len):
+            return [
+                calc_sma_slope_v2(calc_ema(close_series, 20), slope_len).iloc[-1],
+                calc_sma_slope_v2(calc_ema(close_series, 50), slope_len).iloc[-1],
+                calc_sma_slope_v2(calc_ema(close_series, 100), slope_len).iloc[-1],
+                calc_sma_slope_v2(calc_ema(close_series, 200), slope_len).iloc[-1],
+            ]
+        
+        # Daily slopes for each period
+        ema_d_short = calc_slopes_for_period(s_close, 20)
+        ema_d_mid = calc_slopes_for_period(s_close, 50)
+        ema_d_long = calc_slopes_for_period(s_close, 90)
         
         # V24D Filters (Daily)
         rsi_l, rsi_s = calc_rsi_votes(s_close, 3)
@@ -309,29 +317,21 @@ def main():
         w_high = s_high.resample('W-FRI').max()
         w_low = s_low.resample('W-FRI').min()
         
-        if len(w_close) < 50:
-             ema20w = 0; ema50w = 0; ema100w = 0; ema200w = 0
+        if len(w_close) < 90:
+             ema_w_short = [0, 0, 0, 0]
+             ema_w_mid = [0, 0, 0, 0]
+             ema_w_long = [0, 0, 0, 0]
              wrsi_l=False; wrsi_s=False; wmacd_l=False; wmacd_s=False; wadx_l=False; wadx_s=False
         else:
-             ema20w = calc_sma_slope_v2(calc_ema(w_close, 20), 50).iloc[-1]
-             ema50w = calc_sma_slope_v2(calc_ema(w_close, 50), 50).iloc[-1]
-             ema100w = calc_sma_slope_v2(calc_ema(w_close, 100), 50).iloc[-1]
-             ema200w = calc_sma_slope_v2(calc_ema(w_close, 200), 50).iloc[-1]
+             ema_w_short = calc_slopes_for_period(w_close, 20)
+             ema_w_mid = calc_slopes_for_period(w_close, 50)
+             ema_w_long = calc_slopes_for_period(w_close, 90)
              
              wrsi_l, wrsi_s = calc_rsi_votes(w_close, 3)
              wmacd_l, wmacd_s = calc_macd_signal(w_close)
              wadx_l, wadx_s = calc_adx_signal(w_high, w_low, w_close, 14)
 
-        # Monthly Data
-        m_close = s_close.resample('ME').last()
-        
-        if len(m_close) < 50:
-             ema20m = 0; ema50m = 0; ema100m = 0; ema200m = 0
-        else:
-             ema20m = calc_sma_slope_v2(calc_ema(m_close, 20), 50).iloc[-1]
-             ema50m = calc_sma_slope_v2(calc_ema(m_close, 50), 50).iloc[-1]
-             ema100m = calc_sma_slope_v2(calc_ema(m_close, 100), 50).iloc[-1]
-             ema200m = calc_sma_slope_v2(calc_ema(m_close, 200), 50).iloc[-1]
+        # Monthly Data - removed from UI due to insufficient Yahoo Finance data
 
         # Aggregation Logic
         rsi_gen_long = rsi_l and wrsi_l and not rsi_s and not wrsi_s
@@ -372,9 +372,9 @@ def main():
             "symbol": symbol,
             "trend_status": trend_status,
             "ema_slopes": {
-                "d": [ema20d, ema50d, ema100d, ema200d],
-                "w": [ema20w, ema50w, ema100w, ema200w],
-                "m": [ema20m, ema50m, ema100m, ema200m]
+                "short": {"d": ema_d_short, "w": ema_w_short},
+                "mid": {"d": ema_d_mid, "w": ema_w_mid},
+                "long": {"d": ema_d_long, "w": ema_w_long}
             },
             "signals": {
                 "rsi": {"d": [rsi_l, rsi_s], "w": [wrsi_l, wrsi_s]},
