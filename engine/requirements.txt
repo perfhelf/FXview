@@ -1,5 +1,4 @@
 yfinance
 pandas
-git+https://github.com/twopirllc/pandas-ta.git@development
 supabase
 numpy

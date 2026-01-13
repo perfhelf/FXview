@@ -1,7 +1,6 @@
 import os
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
 import numpy as np
 from supabase import create_client, Client
 import json
@@ -29,14 +28,39 @@ SYMBOLS_MAP = {
 }
 
 # ==========================================
+# Pure Pandas Indicator Implementations
+# ==========================================
+
+def calc_ema(series, length):
+    """Calculate Exponential Moving Average using pandas."""
+    return series.ewm(span=length, adjust=False).mean()
+
+def calc_rsi(series, length=14):
+    """Calculate RSI using pure pandas."""
+    delta = series.diff()
+    gain = delta.where(delta > 0, 0.0)
+    loss = (-delta).where(delta < 0, 0.0)
+    
+    avg_gain = gain.ewm(alpha=1/length, min_periods=length, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1/length, min_periods=length, adjust=False).mean()
+    
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def calc_macd(series, fast=12, slow=26, signal=9):
+    """Calculate MACD using pure pandas. Returns (macd_line, signal_line, histogram)."""
+    ema_fast = series.ewm(span=fast, adjust=False).mean()
+    ema_slow = series.ewm(span=slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    histogram = macd_line - signal_line
+    return macd_line, signal_line, histogram
+
+# ==========================================
 # Logic: Synthetic Index Calculation
 # ==========================================
 def calc_synthetic_indices(data):
-    # Extract Series (Close)
-    # yfinance returns MultiIndex (Price, Ticker) or just (Price) if 1 ticker.
-    # We assume 'Close' column.
-    
-    # Helper to get close price series safely
     def get_c(ticker):
         if isinstance(data.columns, pd.MultiIndex):
             return data['Close'][ticker]
@@ -57,41 +81,17 @@ def calc_synthetic_indices(data):
     usd = get_c(SYMBOLS_MAP['USD'])
 
     indices = {}
-
-    # 1. AUD
     indices['AUD'] = aud/0.66047 + (cad*aud)/0.90476 + (aud/eur)/0.61763 + (aud/gbp)/0.53138 + (aud*jpy)/94.23133
-    
-    # 2. CAD
     indices['CAD'] = (1/cad)/0.72965 + (1/(cad*aud))/1.1055 + (1/(eur*cad))/0.68211 + (1/(gbp*cad))/0.58657 + (jpy/cad)/104.165
-
-    # 3. CHF
     indices['CHF'] = (1/chf)/1.12406 + (cad/chf)/1.54202 + (1/(eur*chf))/1.05058 + (1/(chf*gbp))/0.90315 + (jpy/chf)/160.83167
-
-    # 4. JPY
     indices['JPY'] = (1/jpy)/0.00703 + (1/(jpy*aud))/0.01063 + (cad/jpy)/0.00963 + (1/(jpy*gbp))/0.00566 + (1/(jpy*eur))/0.00656
-
-    # 5. EUR
     indices['EUR'] = eur/1.06973 + (eur/aud)/1.62021 + (eur*cad)/1.46625 + (eur/gbp)/0.85959 + (eur*jpy)/152.95167
-
-    # 6. GBP
     indices['GBP'] = gbp/1.24401 + (gbp/aud)/1.88737 + (gbp*cad)/1.70749 + (gbp/eur)/1.16423 + (gbp*jpy)/178.228
-
-    # 7. USD (DXY directly)
     indices['USD'] = usd
-
-    # 8. NZD
     indices['NZD'] = nzd/0.60851 + (cad*nzd)/0.83363 + (nzd/eur)/0.56898 + (nzd/gbp)/0.48991 + (jpy*nzd)/86.76033
-
-    # 9. SGD
     indices['SGD'] = (1/sgd)/0.74527 + (cad/sgd)/1.02258 + (1/(eur*sgd))/0.69684 + (1/(sgd*gbp))/0.59898 + (jpy/sgd)/106.60933
-
-    # 10. MXN
     indices['MXN'] = (1/mxn)/0.05273 + (cad/mxn)/0.07218 + (1/(eur*mxn))/0.0492 + (1/(mxn*gbp))/0.04234 + (jpy/mxn)/7.52667
-
-    # 11. SEK
     indices['SEK'] = (1/sek)/0.09512 + (cad/sek)/0.13038 + (1/(eur*sek))/0.08885 + (1/(sek*gbp))/0.07644 + (jpy/sek)/13.58497
-
-    # 12. NOK
     indices['NOK'] = (1/nok)/0.09603 + (cad/nok)/0.13154 + (1/(eur*nok))/0.08968 + (1/(nok*gbp))/0.07723 + (jpy/nok)/13.68007
 
     return pd.DataFrame(indices)
@@ -101,19 +101,13 @@ def calc_synthetic_indices(data):
 # ==========================================
 
 def calc_sma_slope_v2(series, length):
-    """
-    Calculates SMA-smoothed slope (Kunhou Pivot V23 logic).
-    single_bar_slope = (src - src[1]) / src[1] * 100
-    avg_slope = sma(single_bar_slope, length)
-    """
-    # Daily return percentage
+    """SMA-smoothed slope (Kunhou Pivot V23 logic)."""
     pct_change = series.pct_change() * 100
-    # SMA of that return
     return pct_change.rolling(window=length).mean()
 
 def calc_rsi_votes(series, n_votes):
-    rsi = ta.rsi(series, length=14)
-    if rsi is None: return 0
+    rsi = calc_rsi(series, length=14)
+    if rsi is None or len(rsi) == 0: return False, False
     
     mas = [16, 25, 37, 157, 248, 369]
     up_count = 0
@@ -122,7 +116,6 @@ def calc_rsi_votes(series, n_votes):
     for length in mas:
         ma = rsi.rolling(window=length).mean()
         slope = ma.diff()
-        # Use last value
         if len(slope) > 0:
             val = slope.iloc[-1]
             if pd.isna(val): continue
@@ -140,23 +133,22 @@ def calc_rsi_votes(series, n_votes):
         elif down_count >= n_votes:
             short_sig = True
     else:
-        # Simplified logic for high vote counts from pine
         if up_count >= n_votes: long_sig = True
         elif down_count >= n_votes: short_sig = True
         
     return long_sig, short_sig
 
 def calc_macd_signal(series):
-    # MACD 12, 26, 9
-    macd = ta.macd(series, fast=12, slow=26, signal=9)
-    # Columns: MACD_12_26_9, MACDs_12_26_9, MACDh_12_26_9
-    if macd is None or len(macd) == 0: return False, False
+    macd_line, signal_line, _ = calc_macd(series, fast=12, slow=26, signal=9)
+    if macd_line is None or len(macd_line) == 0: return False, False
     
-    curr = macd.iloc[-1]
-    m_val = curr['MACD_12_26_9']
-    s_val = curr['MACDs_12_26_9']
+    m_val = macd_line.iloc[-1]
+    s_val = signal_line.iloc[-1]
     
     long_sig, short_sig = False, False
+    
+    if pd.isna(m_val) or pd.isna(s_val):
+        return True, True
     
     if m_val == 0 or s_val == 0:
         long_sig, short_sig = True, True
@@ -169,14 +161,12 @@ def calc_macd_signal(series):
     return long_sig, short_sig
 
 def calc_adx_signal(high, low, close, length=14):
-    # Custom ADX logic from Pine
-    # TR calculation
     tr1 = high - low
     tr2 = (high - close.shift(1)).abs()
     tr3 = (low - close.shift(1)).abs()
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     
-    atr = tr.rolling(window=length).mean() # SMA logic from Pine
+    atr = tr.rolling(window=length).mean()
     
     up_move = high - high.shift(1)
     down_move = low.shift(1) - low
@@ -184,47 +174,31 @@ def calc_adx_signal(high, low, close, length=14):
     plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
     minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
     
-    # Convert to Series for rolling
     plus_dm_s = pd.Series(plus_dm, index=high.index)
     minus_dm_s = pd.Series(minus_dm, index=high.index)
     
     plus_di = (plus_dm_s.rolling(window=length).mean() / atr) * 100
     minus_di = (minus_dm_s.rolling(window=length).mean() / atr) * 100
     
-    # Fill nan
     plus_di = plus_di.fillna(0)
     minus_di = minus_di.fillna(0)
     
-    # SMAs of DI
     lengths = [16, 25, 37]
     
-    p_wins = 0
-    m_wins = 0
-    
-    # We only need the last values for signal
     if len(plus_di) < 38: return False, False
     
-    # Voting logic is complex intersection of MA crosses
-    # For simplification in Python, we implement the strict logic:
-    # "p1_wins" etc.
-    
-    # Calculate all MAs first
     p_mas = [plus_di.rolling(window=l).mean().iloc[-1] for l in lengths]
     m_mas = [minus_di.rolling(window=l).mean().iloc[-1] for l in lengths]
     
-    # Check if any is nan
     if any(np.isnan(p_mas)) or any(np.isnan(m_mas)): return False, False
     
     total_long_votes = 0
     total_short_votes = 0
     
-    # p1_wins
     p_ma1 = p_mas[0]; m_ma1 = m_mas[0]
     p_ma2 = p_mas[1]; m_ma2 = m_mas[1]
     p_ma3 = p_mas[2]; m_ma3 = m_mas[2]
     
-    # Vote Logic from Pine
-    # p1_wins = (p_ma1 > m_ma1) + (p_ma1 > m_ma2) + (p_ma1 > m_ma3)
     p1_wins = sum([p_ma1 > m for m in m_mas])
     p2_wins = sum([p_ma2 > m for m in m_mas])
     p3_wins = sum([p_ma3 > m for m in m_mas])
@@ -256,28 +230,12 @@ def main():
     tickers = list(SYMBOLS_MAP.values())
     raw_data = yf.download(tickers, period="2y", interval="1d", progress=False)
     
-    # Handle data structure
-    # If standard, raw_data['Close'] has columns
     if 'Close' not in raw_data:
         print("Error: No Close data found.")
         return
 
-    # Calculate Synthetic Indices
     print("Calculating synthetic indices...")
     df_syn = calc_synthetic_indices(raw_data)
-    
-    # Needs High/Low/Close for ADX. 
-    # Synthetic indices only have calculated 'Close'.
-    # Approximation: use Close for H/L/C or just skip ADX?
-    # GodView logic uses H/L/C for ADX.
-    # We calculated synthetic 'Close'.
-    # To strictly follow GodView, we should also calculate Synthetic High and Low.
-    # But checking Pine Script: `f_v24_proxy_runner` uses `request.security(tkr, 'D', [close, high, low])`.
-    # `tkr` is the formula.
-    # A formula like `AUDUSD/0.66` applied to High/Low is tricky because High_syn != High_raw / const.
-    # However, since we defined the formula on 'Close' value, usually for synthetic indices we assume Close=High=Low for simplicity, 
-    # OR we apply the formula to High and Low separately. 
-    # Given the complexity, we will apply the same formula to High and Low columns of the raw pairs to get Synthetic High/Low.
     
     def get_col(col_name, ticker):
         if isinstance(raw_data.columns, pd.MultiIndex):
@@ -285,7 +243,6 @@ def main():
         else:
             return raw_data[col_name]
 
-    # Re-implement synthetic calc helper for generic series
     def apply_formula(series_getter):
         aud = series_getter(SYMBOLS_MAP['AUD'])
         eur = series_getter(SYMBOLS_MAP['EUR'])
@@ -317,19 +274,16 @@ def main():
 
     df_high = apply_formula(lambda t: get_col('High', t))
     df_low = apply_formula(lambda t: get_col('Low', t))
-    # Close is already df_syn
     
     results = {}
     
     for symbol in df_syn.columns:
         print(f"Processing {symbol}...")
         
-        # 1. Daily Data
         s_close = df_syn[symbol].dropna()
         s_high = df_high[symbol].dropna()
         s_low = df_low[symbol].dropna()
         
-        # Align
         idx = s_close.index.intersection(s_high.index).intersection(s_low.index)
         s_close = s_close.loc[idx]
         s_high = s_high.loc[idx]
@@ -339,72 +293,60 @@ def main():
             print(f"Not enough data for {symbol}")
             continue
 
-        # EMA Slopes (Daily)
-        ema20d = calc_sma_slope_v2(ta.ema(s_close, 20), 50).iloc[-1]
-        ema50d = calc_sma_slope_v2(ta.ema(s_close, 50), 50).iloc[-1]
-        ema100d = calc_sma_slope_v2(ta.ema(s_close, 100), 50).iloc[-1]
-        ema200d = calc_sma_slope_v2(ta.ema(s_close, 200), 50).iloc[-1]
+        # EMA Slopes (Daily) - using pure pandas calc_ema
+        ema20d = calc_sma_slope_v2(calc_ema(s_close, 20), 50).iloc[-1]
+        ema50d = calc_sma_slope_v2(calc_ema(s_close, 50), 50).iloc[-1]
+        ema100d = calc_sma_slope_v2(calc_ema(s_close, 100), 50).iloc[-1]
+        ema200d = calc_sma_slope_v2(calc_ema(s_close, 200), 50).iloc[-1]
         
         # V24D Filters (Daily)
-        # RSI
         rsi_l, rsi_s = calc_rsi_votes(s_close, 3)
-        # MACD
         macd_l, macd_s = calc_macd_signal(s_close)
-        # ADX
         adx_l, adx_s = calc_adx_signal(s_high, s_low, s_close, 14)
         
-        # 2. Weekly Data
-        # Resample to Weekly
+        # Weekly Data
         w_close = s_close.resample('W-FRI').last()
         w_high = s_high.resample('W-FRI').max()
         w_low = s_low.resample('W-FRI').min()
         
         if len(w_close) < 50:
-             # Default fallback
              ema20w = 0; ema50w = 0; ema100w = 0; ema200w = 0
              wrsi_l=False; wrsi_s=False; wmacd_l=False; wmacd_s=False; wadx_l=False; wadx_s=False
         else:
-             ema20w = calc_sma_slope_v2(ta.ema(w_close, 20), 50).iloc[-1]
-             ema50w = calc_sma_slope_v2(ta.ema(w_close, 50), 50).iloc[-1]
-             ema100w = calc_sma_slope_v2(ta.ema(w_close, 100), 50).iloc[-1]
-             ema200w = calc_sma_slope_v2(ta.ema(w_close, 200), 50).iloc[-1]
+             ema20w = calc_sma_slope_v2(calc_ema(w_close, 20), 50).iloc[-1]
+             ema50w = calc_sma_slope_v2(calc_ema(w_close, 50), 50).iloc[-1]
+             ema100w = calc_sma_slope_v2(calc_ema(w_close, 100), 50).iloc[-1]
+             ema200w = calc_sma_slope_v2(calc_ema(w_close, 200), 50).iloc[-1]
              
              wrsi_l, wrsi_s = calc_rsi_votes(w_close, 3)
              wmacd_l, wmacd_s = calc_macd_signal(w_close)
              wadx_l, wadx_s = calc_adx_signal(w_high, w_low, w_close, 14)
 
-        # 3. Monthly Data
+        # Monthly Data
         m_close = s_close.resample('ME').last()
         
         if len(m_close) < 50:
              ema20m = 0; ema50m = 0; ema100m = 0; ema200m = 0
         else:
-             ema20m = calc_sma_slope_v2(ta.ema(m_close, 20), 50).iloc[-1]
-             ema50m = calc_sma_slope_v2(ta.ema(m_close, 50), 50).iloc[-1]
-             ema100m = calc_sma_slope_v2(ta.ema(m_close, 100), 50).iloc[-1]
-             ema200m = calc_sma_slope_v2(ta.ema(m_close, 200), 50).iloc[-1]
+             ema20m = calc_sma_slope_v2(calc_ema(m_close, 20), 50).iloc[-1]
+             ema50m = calc_sma_slope_v2(calc_ema(m_close, 50), 50).iloc[-1]
+             ema100m = calc_sma_slope_v2(calc_ema(m_close, 100), 50).iloc[-1]
+             ema200m = calc_sma_slope_v2(calc_ema(m_close, 200), 50).iloc[-1]
 
-        # 4. Aggregation Logic (Trend Follow Only implemented for brevity, FW is similar)
-        # Using simplified aggregation based on signals
-        
-        # General Status
-        # RSI
+        # Aggregation Logic
         rsi_gen_long = rsi_l and wrsi_l and not rsi_s and not wrsi_s
         rsi_gen_short = rsi_s and wrsi_s and not rsi_l and not wrsi_l
         rsi_gen_wait = not rsi_l and not rsi_s and not wrsi_l and not wrsi_s
         rsi_gen_both = not rsi_gen_long and not rsi_gen_short and not rsi_gen_wait
         
-        # MACD
         macd_gen_long = macd_l and wmacd_l and not macd_s and not wmacd_s
         macd_gen_short = macd_s and wmacd_s and not macd_l and not wmacd_l
         macd_gen_both = not macd_gen_long and not macd_gen_short
         
-        # ADX
         adx_gen_long = adx_l and wadx_l and not adx_s and not wadx_s
         adx_gen_short = adx_s and wadx_s and not adx_l and not wadx_l
         adx_gen_both = not adx_gen_long and not adx_gen_short
         
-        # Trend Status
         trend_long = False
         trend_short = False
         
@@ -426,7 +368,6 @@ def main():
         elif trend_long: trend_status = 1
         elif trend_short: trend_status = -1
         
-        # Payload
         payload = {
             "symbol": symbol,
             "trend_status": trend_status,
@@ -449,7 +390,6 @@ def main():
         print("Pushing to Supabase...")
         sb = create_client(SUPABASE_URL, SUPABASE_KEY)
         for sym, data in results.items():
-            # Handle NaN for JSON compatibility
             def clean_nan(obj):
                 if isinstance(obj, float):
                     if np.isnan(obj) or np.isinf(obj): return 0.0
