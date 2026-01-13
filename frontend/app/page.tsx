@@ -25,18 +25,50 @@ interface SnapshotRow {
 }
 
 const SYMBOL_NAMES: Record<string, string> = {
-  USD: '美元 USD',
-  EUR: '欧元 EUR',
-  GBP: '英镑 GBP',
-  JPY: '日元 JPY',
-  AUD: '澳元 AUD',
-  CAD: '加元 CAD',
-  NZD: '纽元 NZD',
-  CHF: '瑞郎 CHF',
-  SGD: '新元 SGD',
-  MXN: '比索 MXN',
-  SEK: '瑞典 SEK',
-  NOK: '挪威 NOK',
+  USD: '美元',
+  EUR: '欧元',
+  GBP: '英镑',
+  JPY: '日元',
+  AUD: '澳元',
+  CAD: '加元',
+  NZD: '纽元',
+  CHF: '瑞郎',
+  SGD: '新元',
+  MXN: '比索',
+  SEK: '瑞典',
+  NOK: '挪威',
+}
+
+// TradingView formulas for each currency index (from TAIXI 指数.txt)
+const TV_FORMULAS: Record<string, string> = {
+  AUD: 'FX:AUDUSD/0.66047+FX:USDCAD*FX:AUDUSD/0.90476+FX:AUDUSD/FX:EURUSD/0.61763+FX:AUDUSD/FX:GBPUSD/0.53138+FX:AUDUSD*FX:USDJPY/94.23133',
+  CAD: '1/FX:USDCAD/0.72965+1/(FX:USDCAD*FX:AUDUSD)/1.1055+1/(FX:EURUSD*FX:USDCAD)/0.68211+1/(FX:GBPUSD*FX:USDCAD)/0.58657+FX:USDJPY/FX:USDCAD/104.165',
+  CHF: '1/FX:USDCHF/1.12406+FX:USDCAD/FX:USDCHF/1.54202+1/(FX:EURUSD*FX:USDCHF)/1.05058+1/(FX:USDCHF*FX:GBPUSD)/0.90315+FX:USDJPY/FX:USDCHF/160.83167',
+  JPY: '1/FX:USDJPY/0.00703+1/(FX:USDJPY*FX:AUDUSD)/0.01063+FX:USDCAD/FX:USDJPY/0.00963+1/(FX:USDJPY*FX:GBPUSD)/0.00566+1/(FX:USDJPY*FX:EURUSD)/0.00656',
+  EUR: 'FX:EURUSD/1.06973+FX:EURUSD/FX:AUDUSD/1.62021+FX:EURUSD*FX:USDCAD/1.46625+FX:EURUSD/FX:GBPUSD/0.85959+FX:EURUSD*FX:USDJPY/152.95167',
+  GBP: 'FX:GBPUSD/1.24401+FX:GBPUSD/FX:AUDUSD/1.88737+FX:GBPUSD*FX:USDCAD/1.70749+FX:GBPUSD/FX:EURUSD/1.16423+FX:GBPUSD*FX:USDJPY/178.228',
+  USD: 'TVC:DXY', // Use DXY directly
+  NZD: 'FX:NZDUSD/0.60851+FX:USDCAD*FX:NZDUSD/0.83363+FX:NZDUSD/FX:EURUSD/0.56898+FX:NZDUSD/FX:GBPUSD/0.48991+FX:USDJPY*FX:NZDUSD/86.76033',
+  SGD: '1/OANDA:USDSGD/0.74527+FX:USDCAD/OANDA:USDSGD/1.02258+1/(FX:EURUSD*OANDA:USDSGD)/0.69684+1/(OANDA:USDSGD*FX:GBPUSD)/0.59898+FX:USDJPY/OANDA:USDSGD/106.60933',
+  MXN: '1/FX:USDMXN/0.05273+FX:USDCAD/FX:USDMXN/0.07218+1/(FX:EURUSD*FX:USDMXN)/0.0492+1/(FX:USDMXN*FX:GBPUSD)/0.04234+FX:USDJPY/FX:USDMXN/7.52667',
+  SEK: '1/FX:USDSEK/0.09512+FX:USDCAD/FX:USDSEK/0.13038+1/(FX:EURUSD*FX:USDSEK)/0.08885+1/(FX:USDSEK*FX:GBPUSD)/0.07644+FX:USDJPY/FX:USDSEK/13.58497',
+  NOK: '1/OANDA:USDNOK/0.09603+FX:USDCAD/OANDA:USDNOK/0.13154+1/(FX:EURUSD*OANDA:USDNOK)/0.08968+1/(OANDA:USDNOK*FX:GBPUSD)/0.07723+FX:USDJPY/OANDA:USDNOK/13.68007',
+}
+
+const INTERVALS = [
+  { label: '1H', value: '60' },
+  { label: '2H', value: '120' },
+  { label: '4H', value: '240' },
+  { label: '日', value: 'D' },
+  { label: '周', value: 'W' },
+  { label: '月', value: 'M' },
+]
+
+function getTradingViewUrl(symbol: string, interval: string = '30') {
+  const formula = TV_FORMULAS[symbol]
+  if (!formula) return '#'
+  const encodedSymbol = encodeURIComponent(formula)
+  return `https://cn.tradingview.com/chart/?symbol=${encodedSymbol}&interval=${interval}`
 }
 
 const THRESHOLDS = { flat: 0.001, weak: 0.003, healthy: 0.005 }
@@ -77,6 +109,38 @@ function SignalIcon({ long, short }: { long: boolean, short: boolean }) {
   if (long) return <span>🟢</span>
   if (short) return <span>🔴</span>
   return <span>⚪</span>
+}
+
+function CurrencyCell({ symbol }: { symbol: string }) {
+  const name = SYMBOL_NAMES[symbol] || symbol
+
+  return (
+    <td className="px-2 py-2">
+      <div className="flex items-center gap-1 flex-wrap">
+        <a
+          href={getTradingViewUrl(symbol, '30')}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-blue-300 hover:text-blue-100 hover:underline cursor-pointer"
+        >
+          {name} {symbol}
+        </a>
+        <div className="flex gap-0.5">
+          {INTERVALS.map((int) => (
+            <a
+              key={int.value}
+              href={getTradingViewUrl(symbol, int.value)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-1.5 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 rounded text-slate-300 hover:text-white transition-colors"
+            >
+              {int.label}
+            </a>
+          ))}
+        </div>
+      </div>
+    </td>
+  )
 }
 
 export default function Home() {
@@ -155,7 +219,7 @@ export default function Home() {
               const d = row.data
               return (
                 <tr key={row.symbol} className="border-t border-slate-700 hover:bg-slate-800/50 transition-colors">
-                  <td className="px-3 py-2 font-medium text-blue-300">{SYMBOL_NAMES[row.symbol] || row.symbol}</td>
+                  <CurrencyCell symbol={row.symbol} />
                   <td className="px-3 py-2 text-center"><TrendBadge status={d.trend_status} /></td>
                   <td className="px-3 py-2 text-center">
                     <SignalIcon long={d.signals.rsi.d[0]} short={d.signals.rsi.d[1]} />
