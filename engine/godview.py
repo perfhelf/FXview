@@ -702,7 +702,11 @@ def main():
                 return obj
 
             clean_data = clean_nan(data)
-            sb.table('godview_snapshot').upsert({'symbol': sym, 'data': clean_data}).execute()
+            sb.table('godview_snapshot').upsert({
+                'symbol': sym, 
+                'data': clean_data,
+                'updated_at': datetime.utcnow().isoformat()
+            }).execute()
         print("Done.")
     else:
         print("No Supabase Credentials found. Dumping JSON.")
