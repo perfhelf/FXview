@@ -29,6 +29,7 @@ interface SnapshotRow {
 }
 
 type TrendPeriod = 'short' | 'mid' | 'long'
+type ViewMode = 'card' | 'table'
 
 // ==========================================
 // Constants
@@ -66,6 +67,7 @@ const TREND_PERIODS = [
 ] as const
 
 const THRESHOLDS = { flat: 0.001, weak: 0.003, healthy: 0.005 }
+const EMA_LABELS = ['EMA20', 'EMA50', 'EMA100', 'EMA200']
 
 // ==========================================
 // Helper Components & Functions
@@ -105,6 +107,18 @@ function SlopeCell({ slope }: { slope: number }) {
       <div>{icon} {slope.toFixed(4)}</div>
       <div className="text-[10px] opacity-70">{text}</div>
     </td>
+  )
+}
+
+// Card version of SlopeCell (as a div, not td)
+function SlopeCellDiv({ slope, label }: { slope: number, label?: string }) {
+  const { icon, text, color } = getSlopeStatus(slope)
+  return (
+    <div className={`text-center text-xs ${color} flex-1`}>
+      {label && <div className="text-[9px] text-slate-500 font-mono mb-0.5">{label}</div>}
+      <div>{icon} {slope.toFixed(4)}</div>
+      <div className="text-[10px] opacity-70">{text}</div>
+    </div>
   )
 }
 
@@ -149,12 +163,12 @@ function CurrencyCell({ symbol }: { symbol: string }) {
 
 function TrendPeriodSelector({ selected, onSelect }: { selected: TrendPeriod, onSelect: (p: TrendPeriod) => void }) {
   return (
-    <div className="flex justify-center gap-2 mb-4">
+    <div className="flex justify-center gap-2 flex-wrap">
       {TREND_PERIODS.map((tp) => (
         <button
           key={tp.key}
           onClick={() => onSelect(tp.key)}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${selected === tp.key
+          className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${selected === tp.key
               ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
               : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
             }`}
@@ -163,6 +177,31 @@ function TrendPeriodSelector({ selected, onSelect }: { selected: TrendPeriod, on
           <span className="ml-1 text-xs opacity-70">({tp.period})</span>
         </button>
       ))}
+    </div>
+  )
+}
+
+function ViewModeToggle({ selected, onSelect }: { selected: ViewMode, onSelect: (m: ViewMode) => void }) {
+  return (
+    <div className="flex justify-center gap-2 mt-3">
+      <button
+        onClick={() => onSelect('card')}
+        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1 ${selected === 'card'
+            ? 'bg-teal-600 text-white'
+            : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+          }`}
+      >
+        📇 信息卡
+      </button>
+      <button
+        onClick={() => onSelect('table')}
+        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1 ${selected === 'table'
+            ? 'bg-teal-600 text-white'
+            : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+          }`}
+      >
+        📊 表格
+      </button>
     </div>
   )
 }
@@ -176,24 +215,24 @@ function ThemeToggle() {
   if (!mounted) return null
 
   const options = [
-    { key: 'light' as const, icon: '☀️', label: 'Light' },
-    { key: 'dark' as const, icon: '🌙', label: 'Dark' },
-    { key: 'system' as const, icon: '🖥️', label: 'Auto' },
+    { key: 'light' as const, icon: '☀️' },
+    { key: 'dark' as const, icon: '🌙' },
+    { key: 'system' as const, icon: '🖥️' },
   ]
 
   return (
-    <div className="absolute top-4 right-4 flex rounded-lg overflow-hidden shadow-sm border border-slate-300 dark:border-slate-700">
+    <div className="flex rounded-lg overflow-hidden shadow-sm border border-slate-300 dark:border-slate-700">
       {options.map((opt) => (
         <button
           key={opt.key}
           onClick={() => setTheme(opt.key)}
-          className={`px-3 py-1.5 text-sm font-medium transition-colors ${theme === opt.key
+          className={`px-2 py-1 sm:px-3 sm:py-1.5 text-sm font-medium transition-colors ${theme === opt.key
               ? 'bg-blue-600 text-white'
               : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
             }`}
-          aria-label={opt.label}
+          aria-label={opt.key}
         >
-          {opt.icon} {opt.label}
+          {opt.icon}
         </button>
       ))}
     </div>
@@ -201,7 +240,7 @@ function ThemeToggle() {
 }
 
 // ==========================================
-// Sub-Components (New: Responsive)
+// Sub-Components (Table Row & Card)
 // ==========================================
 
 function CurrencyRow({ row, trendPeriod }: { row: SnapshotRow, trendPeriod: TrendPeriod }) {
@@ -295,18 +334,24 @@ function CurrencyCard({ row, trendPeriod }: { row: SnapshotRow, trendPeriod: Tre
         </div>
       </div>
 
-      {/* Slopes */}
-      <div className="space-y-2 text-sm bg-slate-800/30 rounded-lg p-2">
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-teal-400/70 font-mono w-8">Daily</span>
-          <div className="flex gap-1 flex-1 justify-end">
-            {dailySlopes.map((s, i) => <div key={i} className="scale-90 origin-right"><SlopeCell slope={s} /></div>)}
+      {/* Slopes with EMA Labels */}
+      <div className="space-y-3 text-sm bg-slate-800/30 rounded-lg p-2">
+        {/* Daily Row */}
+        <div>
+          <div className="text-xs text-teal-400/70 font-mono mb-1">Daily</div>
+          <div className="flex gap-1">
+            {dailySlopes.map((s, i) => (
+              <SlopeCellDiv key={i} slope={s} label={EMA_LABELS[i]} />
+            ))}
           </div>
         </div>
-        <div className="flex items-center justify-between border-t border-slate-800/50 pt-2">
-          <span className="text-xs text-purple-400/70 font-mono w-8">Weekly</span>
-          <div className="flex gap-1 flex-1 justify-end">
-            {weeklySlopes.map((s, i) => <div key={i} className="scale-90 origin-right"><SlopeCell slope={s} /></div>)}
+        {/* Weekly Row */}
+        <div className="border-t border-slate-800/50 pt-2">
+          <div className="text-xs text-purple-400/70 font-mono mb-1">Weekly</div>
+          <div className="flex gap-1">
+            {weeklySlopes.map((s, i) => (
+              <SlopeCellDiv key={i} slope={s} label={EMA_LABELS[i]} />
+            ))}
           </div>
         </div>
       </div>
@@ -337,6 +382,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [lastUpdate, setLastUpdate] = useState<string | null>(null)
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>('short')
+  const [viewMode, setViewMode] = useState<ViewMode>('card') // Default to card
 
   useEffect(() => {
     async function fetchData() {
@@ -376,54 +422,65 @@ export default function Home() {
 
   return (
     <main className="p-4 md:p-8 relative min-h-screen">
-      <ThemeToggle />
-      <header className="mb-4 text-center">
-        <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
-          🌐 鲲侯FXView · 全球汇率上帝视角
-        </h1>
-        <p className="text-sm text-slate-400 mt-2">
+      {/* Header with Theme Toggle */}
+      <header className="mb-4">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent text-center sm:text-left">
+            🌐 鲲侯FXView · 全球汇率上帝视角
+          </h1>
+          <ThemeToggle />
+        </div>
+        <p className="text-sm text-slate-400 mt-2 text-center sm:text-left">
           Last Update: {lastUpdate ? new Date(lastUpdate).toLocaleString() : 'N/A'}
         </p>
       </header>
 
-      <TrendPeriodSelector selected={trendPeriod} onSelect={setTrendPeriod} />
-
-      {/* Responsive Layout Switcher */}
-
-      {/* 1. Desktop Table View (Hidden on screens smaller than lg/1024px) */}
-      <div className="hidden lg:block overflow-x-auto rounded-lg border border-slate-700 shadow-xl">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-800/90 text-slate-200">
-            <tr>
-              <th className="px-3 py-3 text-left font-semibold">货币</th>
-              <th className="px-3 py-3 text-center font-semibold">司令部</th>
-              <th className="px-3 py-3 text-center font-semibold text-xs opacity-70">RSI</th>
-              <th className="px-3 py-3 text-center font-semibold text-xs opacity-70">MACD</th>
-              <th className="px-3 py-3 text-center font-semibold text-xs opacity-70">ADX</th>
-              <th className="px-2 py-3 text-center bg-teal-900/40 text-teal-200 text-xs font-mono">20D</th>
-              <th className="px-2 py-3 text-center bg-teal-900/40 text-teal-200 text-xs font-mono">50D</th>
-              <th className="px-2 py-3 text-center bg-teal-900/40 text-teal-200 text-xs font-mono">100D</th>
-              <th className="px-2 py-3 text-center bg-teal-900/40 text-teal-200 text-xs font-mono">200D</th>
-              <th className="px-2 py-3 text-center bg-purple-900/40 text-purple-200 text-xs font-mono">20W</th>
-              <th className="px-2 py-3 text-center bg-purple-900/40 text-purple-200 text-xs font-mono">50W</th>
-              <th className="px-2 py-3 text-center bg-purple-900/40 text-purple-200 text-xs font-mono">100W</th>
-              <th className="px-2 py-3 text-center bg-purple-900/40 text-purple-200 text-xs font-mono">200W</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-700/50 bg-slate-900/50">
-            {data.map((row) => (
-              <CurrencyRow key={row.symbol} row={row} trendPeriod={trendPeriod} />
-            ))}
-          </tbody>
-        </table>
+      {/* Controls */}
+      <div className="mb-6">
+        <TrendPeriodSelector selected={trendPeriod} onSelect={setTrendPeriod} />
+        <ViewModeToggle selected={viewMode} onSelect={setViewMode} />
       </div>
 
-      {/* 2. Mobile/Tablet Card View (Visible on screens smaller than lg/1024px) */}
-      <div className="lg:hidden grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {data.map((row) => (
-          <CurrencyCard key={row.symbol} row={row} trendPeriod={trendPeriod} />
-        ))}
-      </div>
+      {/* View Mode Switching (State-Based, not Responsive) */}
+
+      {/* Table View */}
+      {viewMode === 'table' && (
+        <div className="overflow-x-auto rounded-lg border border-slate-700 shadow-xl">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-800/90 text-slate-200">
+              <tr>
+                <th className="px-3 py-3 text-left font-semibold">货币</th>
+                <th className="px-3 py-3 text-center font-semibold">司令部</th>
+                <th className="px-3 py-3 text-center font-semibold text-xs opacity-70">RSI</th>
+                <th className="px-3 py-3 text-center font-semibold text-xs opacity-70">MACD</th>
+                <th className="px-3 py-3 text-center font-semibold text-xs opacity-70">ADX</th>
+                <th className="px-2 py-3 text-center bg-teal-900/40 text-teal-200 text-xs font-mono">20D</th>
+                <th className="px-2 py-3 text-center bg-teal-900/40 text-teal-200 text-xs font-mono">50D</th>
+                <th className="px-2 py-3 text-center bg-teal-900/40 text-teal-200 text-xs font-mono">100D</th>
+                <th className="px-2 py-3 text-center bg-teal-900/40 text-teal-200 text-xs font-mono">200D</th>
+                <th className="px-2 py-3 text-center bg-purple-900/40 text-purple-200 text-xs font-mono">20W</th>
+                <th className="px-2 py-3 text-center bg-purple-900/40 text-purple-200 text-xs font-mono">50W</th>
+                <th className="px-2 py-3 text-center bg-purple-900/40 text-purple-200 text-xs font-mono">100W</th>
+                <th className="px-2 py-3 text-center bg-purple-900/40 text-purple-200 text-xs font-mono">200W</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-700/50 bg-slate-900/50">
+              {data.map((row) => (
+                <CurrencyRow key={row.symbol} row={row} trendPeriod={trendPeriod} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Card View */}
+      {viewMode === 'card' && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {data.map((row) => (
+            <CurrencyCard key={row.symbol} row={row} trendPeriod={trendPeriod} />
+          ))}
+        </div>
+      )}
 
       <footer className="mt-12 text-center text-sm text-slate-500 space-y-2 pb-8">
         <p>本站所有指数算法由太囍倾情提供</p>
