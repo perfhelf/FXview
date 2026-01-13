@@ -148,10 +148,6 @@ export default function Home() {
               <th className="px-2 py-2 text-center bg-purple-900/30">E50W</th>
               <th className="px-2 py-2 text-center bg-purple-900/30">E100W</th>
               <th className="px-2 py-2 text-center bg-purple-900/30">E200W</th>
-              <th className="px-2 py-2 text-center bg-orange-900/30">E20M</th>
-              <th className="px-2 py-2 text-center bg-orange-900/30">E50M</th>
-              <th className="px-2 py-2 text-center bg-orange-900/30">E100M</th>
-              <th className="px-2 py-2 text-center bg-orange-900/30">E200M</th>
             </tr>
           </thead>
           <tbody>
@@ -189,11 +185,6 @@ export default function Home() {
                   <SlopeCell slope={d.ema_slopes.w[1]} />
                   <SlopeCell slope={d.ema_slopes.w[2]} />
                   <SlopeCell slope={d.ema_slopes.w[3]} />
-                  {/* Monthly EMAs */}
-                  <SlopeCell slope={d.ema_slopes.m[0]} />
-                  <SlopeCell slope={d.ema_slopes.m[1]} />
-                  <SlopeCell slope={d.ema_slopes.m[2]} />
-                  <SlopeCell slope={d.ema_slopes.m[3]} />
                 </tr>
               )
             })}
