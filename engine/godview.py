@@ -70,10 +70,14 @@ def calc_macd(series, fast=12, slow=26, signal=9):
 # ==========================================
 def calc_synthetic_indices(data):
     def get_c(ticker):
-        if isinstance(data.columns, pd.MultiIndex):
-            return data['Close'][ticker]
-        else:
-            return data['Close']
+        try:
+            if isinstance(data.columns, pd.MultiIndex):
+                return data['Close'][ticker]
+            else:
+                return data['Close']
+        except KeyError:
+            print(f"Warning: Data for {ticker} not found. Returning NaN.")
+            return pd.Series(np.nan, index=data.index)
 
     aud = get_c(SYMBOLS_MAP['AUD'])
     eur = get_c(SYMBOLS_MAP['EUR'])
