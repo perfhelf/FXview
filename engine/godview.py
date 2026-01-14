@@ -24,6 +24,8 @@ SYMBOLS_MAP = {
     'SGD': 'USDSGD=X',
     'SEK': 'USDSEK=X',
     'NOK': 'USDNOK=X',
+    'CNH': 'USDCNH=X',
+    'MYR': 'USDMYR=X',
     'USD': 'DX-Y.NYB' 
 }
 
@@ -78,6 +80,8 @@ def calc_synthetic_indices(data):
     sgd = get_c(SYMBOLS_MAP['SGD'])
     sek = get_c(SYMBOLS_MAP['SEK'])
     nok = get_c(SYMBOLS_MAP['NOK'])
+    cnh = get_c(SYMBOLS_MAP['CNH'])
+    myr = get_c(SYMBOLS_MAP['MYR'])
     usd = get_c(SYMBOLS_MAP['USD'])
 
     indices = {}
@@ -93,6 +97,8 @@ def calc_synthetic_indices(data):
     indices['MXN'] = (1/mxn)/0.05273 + (cad/mxn)/0.07218 + (1/(eur*mxn))/0.0492 + (1/(mxn*gbp))/0.04234 + (jpy/mxn)/7.52667
     indices['SEK'] = (1/sek)/0.09512 + (cad/sek)/0.13038 + (1/(eur*sek))/0.08885 + (1/(sek*gbp))/0.07644 + (jpy/sek)/13.58497
     indices['NOK'] = (1/nok)/0.09603 + (cad/nok)/0.13154 + (1/(eur*nok))/0.08968 + (1/(nok*gbp))/0.07723 + (jpy/nok)/13.68007
+    indices['CNH'] = (1/cnh)/0.13793 + (eur/cnh)/0.14759 + (gbp/cnh)/0.17159 + (jpy/cnh)/19.72414 + (aud/cnh)/0.09103
+    indices['MYR'] = (1/myr)/0.22371 + (eur/myr)/0.23937 + (gbp/myr)/0.27740 + (jpy/myr)/31.99552 + (aud/myr)/0.14765
 
     return pd.DataFrame(indices)
 
@@ -535,6 +541,8 @@ def main():
         sgd = series_getter(SYMBOLS_MAP['SGD'])
         sek = series_getter(SYMBOLS_MAP['SEK'])
         nok = series_getter(SYMBOLS_MAP['NOK'])
+        cnh = series_getter(SYMBOLS_MAP['CNH'])
+        myr = series_getter(SYMBOLS_MAP['MYR'])
         usd = series_getter(SYMBOLS_MAP['USD'])
         
         res = {}
@@ -550,6 +558,8 @@ def main():
         res['MXN'] = (1/mxn)/0.05273 + (cad/mxn)/0.07218 + (1/(eur*mxn))/0.0492 + (1/(mxn*gbp))/0.04234 + (jpy/mxn)/7.52667
         res['SEK'] = (1/sek)/0.09512 + (cad/sek)/0.13038 + (1/(eur*sek))/0.08885 + (1/(sek*gbp))/0.07644 + (jpy/sek)/13.58497
         res['NOK'] = (1/nok)/0.09603 + (cad/nok)/0.13154 + (1/(eur*nok))/0.08968 + (1/(nok*gbp))/0.07723 + (jpy/nok)/13.68007
+        res['CNH'] = (1/cnh)/0.13793 + (eur/cnh)/0.14759 + (gbp/cnh)/0.17159 + (jpy/cnh)/19.72414 + (aud/cnh)/0.09103
+        res['MYR'] = (1/myr)/0.22371 + (eur/myr)/0.23937 + (gbp/myr)/0.27740 + (jpy/myr)/31.99552 + (aud/myr)/0.14765
         return pd.DataFrame(res)
 
     df_high = apply_formula(lambda t: get_col('High', t))
