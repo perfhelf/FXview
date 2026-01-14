@@ -24,7 +24,7 @@ SYMBOLS_MAP = {
     'SGD': 'USDSGD=X',
     'SEK': 'USDSEK=X',
     'NOK': 'USDNOK=X',
-    'CNH': 'USDCNH=X',
+    'CNH': 'CNY=X',
     'MYR': 'USDMYR=X',
     'USD': 'DX-Y.NYB' 
 }

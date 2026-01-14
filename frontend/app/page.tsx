@@ -45,7 +45,7 @@ const SYMBOL_NAMES: Record<string, string> = {
   USD: '美元', EUR: '欧元', GBP: '英镑', JPY: '日元',
   AUD: '澳元', CAD: '加元', NZD: '纽元', CHF: '瑞郎',
   SGD: '新元', MXN: '比索', SEK: '瑞典', NOK: '挪威',
-  CNH: '离岸人民币', MYR: '林吉特',
+  CNH: '人民币', MYR: '林吉特',
 }
 
 const TV_FORMULAS: Record<string, string> = {
