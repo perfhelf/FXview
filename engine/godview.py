@@ -546,10 +546,14 @@ def main():
     df_syn = calc_synthetic_indices(raw_data)
     
     def get_col(col_name, ticker):
-        if isinstance(raw_data.columns, pd.MultiIndex):
-            return raw_data[col_name][ticker]
-        else:
-            return raw_data[col_name]
+        try:
+            if isinstance(raw_data.columns, pd.MultiIndex):
+                return raw_data[col_name][ticker]
+            else:
+                return raw_data[col_name]
+        except KeyError:
+            print(f"Warning: {col_name} Data for {ticker} not found. Returning NaN.")
+            return pd.Series(np.nan, index=raw_data.index)
 
     def apply_formula(series_getter):
         aud = series_getter(SYMBOLS_MAP['AUD'])
