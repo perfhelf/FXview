@@ -579,6 +579,12 @@ def main():
         
         res = {}
         res['AUD'] = aud/0.66047 + (cad*aud)/0.90476 + (aud/eur)/0.61763 + (aud/gbp)/0.53138 + (aud*jpy)/94.23133
+        res['CAD'] = (1/cad)/0.72965 + (1/(cad*aud))/1.1055 + (1/(eur*cad)/0.68211) + (1/(gbp*cad)/0.58657) + (jpy/cad)/104.165 
+        # Note: CAD formula above had parens slightly diff in original but keeping style consistent with copy-paste from calc_synthetic_indices logic
+        # Original global calc_synthetic_indices line 89: 
+        # indices['CAD'] = (1/cad)/0.72965 + (1/(cad*aud))/1.1055 + (1/(eur*cad))/0.68211 + (1/(gbp*cad))/0.58657 + (jpy/cad)/104.165
+        # The line below uses copied logic (which I should strictly copy from global function)
+        
         res['CAD'] = (1/cad)/0.72965 + (1/(cad*aud))/1.1055 + (1/(eur*cad))/0.68211 + (1/(gbp*cad))/0.58657 + (jpy/cad)/104.165
         res['CHF'] = (1/chf)/1.12406 + (cad/chf)/1.54202 + (1/(eur*chf))/1.05058 + (1/(chf*gbp))/0.90315 + (jpy/chf)/160.83167
         res['JPY'] = (1/jpy)/0.00703 + (1/(jpy*aud))/0.01063 + (cad/jpy)/0.00963 + (1/(jpy*gbp))/0.00566 + (1/(jpy*eur))/0.00656
@@ -592,6 +598,12 @@ def main():
         res['NOK'] = (1/nok)/0.09603 + (cad/nok)/0.13154 + (1/(eur*nok))/0.08968 + (1/(nok*gbp))/0.07723 + (jpy/nok)/13.68007
         res['CNH'] = (1/cnh)/0.13793 + (eur/cnh)/0.14759 + (gbp/cnh)/0.17159 + (jpy/cnh)/19.72414 + (aud/cnh)/0.09103
         res['MYR'] = (1/myr)/0.22371 + (eur/myr)/0.23937 + (gbp/myr)/0.27740 + (jpy/myr)/31.99552 + (aud/myr)/0.14765
+        res['XAU'] = xau/4629 + (xau/eur)/3973 + (xau/gbp)/3444 + (xau*jpy)/734159 + (xau/aud)/6929
+        res['XAG'] = xag/85.23 + (xag/eur)/73.16 + (xag/gbp)/63.41 + (xag*jpy)/13517 + (xag/aud)/127.59
+        res['XCU'] = xcu/6.05 + (xcu/eur)/5.19 + (xcu/gbp)/4.50 + (xcu*jpy)/959.5 + (xcu/aud)/9.06
+        res['ZAR'] = (1/zar)/0.06109 + (eur/zar)/0.07116 + (gbp/zar)/0.08210 + (jpy/zar)/9.688 + (aud/zar)/0.04080
+        res['KRW'] = (1/krw)/0.000682 + (eur/krw)/0.000794 + (gbp/krw)/0.000916 + (jpy/krw)/0.10818 + (aud/krw)/0.000455
+        res['BRL'] = (1/brl)/0.1858 + (eur/brl)/0.2165 + (gbp/brl)/0.2498 + (jpy/brl)/29.47 + (aud/brl)/0.1241
         return pd.DataFrame(res)
 
     df_high = apply_formula(lambda t: get_col('High', t))
