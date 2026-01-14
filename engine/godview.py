@@ -607,8 +607,14 @@ def main():
         s_high = s_high.loc[idx]
         s_low = s_low.loc[idx]
         
-        if len(s_close) < 200:
-            print(f"Not enough data for {symbol}")
+        # Dynamic minimum length check
+        # Commodities and Emerging currencies might have shorter history in Yahoo
+        min_len = 200
+        if symbol in ['XAU', 'XAG', 'XCU', 'ZAR', 'KRW', 'BRL']:
+            min_len = 50
+
+        if len(s_close) < min_len:
+            print(f"Not enough data for {symbol} (Has {len(s_close)}, Need {min_len})")
             continue
 
         # EMA Slopes (Daily) - Calculate for all three periods: short(20), mid(50), long(90)
