@@ -26,6 +26,12 @@ SYMBOLS_MAP = {
     'NOK': 'USDNOK=X',
     'CNH': 'CNY=X',
     'MYR': 'USDMYR=X',
+    'XAU': 'XAUUSD=X',
+    'XAG': 'XAGUSD=X',
+    'XCU': 'HG=F',
+    'ZAR': 'USDZAR=X',
+    'KRW': 'USDKRW=X',
+    'BRL': 'USDBRL=X',
     'USD': 'DX-Y.NYB' 
 }
 
@@ -82,6 +88,12 @@ def calc_synthetic_indices(data):
     nok = get_c(SYMBOLS_MAP['NOK'])
     cnh = get_c(SYMBOLS_MAP['CNH'])
     myr = get_c(SYMBOLS_MAP['MYR'])
+    xau = get_c(SYMBOLS_MAP['XAU'])
+    xag = get_c(SYMBOLS_MAP['XAG'])
+    xcu = get_c(SYMBOLS_MAP['XCU'])
+    zar = get_c(SYMBOLS_MAP['ZAR'])
+    krw = get_c(SYMBOLS_MAP['KRW'])
+    brl = get_c(SYMBOLS_MAP['BRL'])
     usd = get_c(SYMBOLS_MAP['USD'])
 
     indices = {}
@@ -99,6 +111,12 @@ def calc_synthetic_indices(data):
     indices['NOK'] = (1/nok)/0.09603 + (cad/nok)/0.13154 + (1/(eur*nok))/0.08968 + (1/(nok*gbp))/0.07723 + (jpy/nok)/13.68007
     indices['CNH'] = (1/cnh)/0.13793 + (eur/cnh)/0.14759 + (gbp/cnh)/0.17159 + (jpy/cnh)/19.72414 + (aud/cnh)/0.09103
     indices['MYR'] = (1/myr)/0.22371 + (eur/myr)/0.23937 + (gbp/myr)/0.27740 + (jpy/myr)/31.99552 + (aud/myr)/0.14765
+    indices['XAU'] = xau/4629 + (xau/eur)/3973 + (xau/gbp)/3444 + (xau*jpy)/734159 + (xau/aud)/6929
+    indices['XAG'] = xag/85.23 + (xag/eur)/73.16 + (xag/gbp)/63.41 + (xag*jpy)/13517 + (xag/aud)/127.59
+    indices['XCU'] = xcu/6.05 + (xcu/eur)/5.19 + (xcu/gbp)/4.50 + (xcu*jpy)/959.5 + (xcu/aud)/9.06
+    indices['ZAR'] = (1/zar)/0.06109 + (eur/zar)/0.07116 + (gbp/zar)/0.08210 + (jpy/zar)/9.688 + (aud/zar)/0.04080
+    indices['KRW'] = (1/krw)/0.000682 + (eur/krw)/0.000794 + (gbp/krw)/0.000916 + (jpy/krw)/0.10818 + (aud/krw)/0.000455
+    indices['BRL'] = (1/brl)/0.1858 + (eur/brl)/0.2165 + (gbp/brl)/0.2498 + (jpy/brl)/29.47 + (aud/brl)/0.1241
 
     return pd.DataFrame(indices)
 
@@ -543,6 +561,12 @@ def main():
         nok = series_getter(SYMBOLS_MAP['NOK'])
         cnh = series_getter(SYMBOLS_MAP['CNH'])
         myr = series_getter(SYMBOLS_MAP['MYR'])
+        xau = series_getter(SYMBOLS_MAP['XAU'])
+        xag = series_getter(SYMBOLS_MAP['XAG'])
+        xcu = series_getter(SYMBOLS_MAP['XCU'])
+        zar = series_getter(SYMBOLS_MAP['ZAR'])
+        krw = series_getter(SYMBOLS_MAP['KRW'])
+        brl = series_getter(SYMBOLS_MAP['BRL'])
         usd = series_getter(SYMBOLS_MAP['USD'])
         
         res = {}
