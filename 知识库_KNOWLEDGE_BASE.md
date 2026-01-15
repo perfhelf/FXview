@@ -424,6 +424,96 @@ vercel --prod --yes
 
 ---
 
+## 11. 股指综合指数添加指南
+
+### 11.1 TAIXI 方法应用于股指
+
+股指与货币指数不同，股指有**本币计价**的问题。TAIXI 方法将股指转换为**多货币标准化视角**，消除本币汇率波动干扰。
+
+**通用公式结构**：
+```
+指数综合 = 指数/USD基准 + 指数/EUR基准 + 指数/GBP基准 + 指数/JPY基准 + 指数/AUD基准
+```
+
+### 11.2 不同计价币种的换算公式
+
+| 计价币种 | 第1项(USD) | 第2项(EUR) | 第3项(GBP) | 第4项(JPY) | 第5项(AUD) |
+|---------|-----------|-----------|-----------|-----------|-----------|
+| **USD** | Index | Index/EURUSD | Index/GBPUSD | Index×USDJPY | Index/AUDUSD |
+| **EUR** | Index×EURUSD | Index | Index×EURUSD/GBPUSD | Index×EURUSD×USDJPY | Index×EURUSD/AUDUSD |
+| **GBP** | Index×GBPUSD | Index×GBPUSD/EURUSD | Index | Index×GBPUSD×USDJPY | Index×GBPUSD/AUDUSD |
+| **JPY** | Index/USDJPY | Index/USDJPY/EURUSD | Index/USDJPY/GBPUSD | Index | Index/USDJPY/AUDUSD |
+| **其他(XXX)** | Index/USDXXX | Index/USDXXX/EURUSD | Index/USDXXX/GBPUSD | Index/USDXXX×USDJPY | Index/USDXXX/AUDUSD |
+
+### 11.3 基准值计算方法
+
+1. 获取当前市场价格（指数价格 + 相关汇率）
+2. 代入公式各项，计算当前值
+3. 这些值即为基准值（使指数归一化到约 5 左右）
+
+**示例**：SPX500 (USD 计价)，当前价格 5950
+- 第1项基准：5950
+- 第2项基准：5950/1.07 ≈ 6367
+- 第3项基准：5950/1.27 ≈ 7557
+- 第4项基准：5950×143 ≈ 850850
+- 第5项基准：5950/0.66 ≈ 9015
+
+### 11.4 添加新股指的步骤
+
+1. **确定计价币种**：在 TradingView 上查看指数的实际报价单位
+2. **创建公式文档**：先写出 TV 公式供用户测试
+3. **用户验证公式**：在 TV 搜索框粘贴公式，确认能正常显示
+4. **后端添加**：
+   - `SYMBOLS_MAP` 添加 Yahoo Ticker
+   - `calc_synthetic_indices` 添加公式
+   - `apply_formula` **必须同步添加**（教训！）
+5. **前端添加**：
+   - `SYMBOL_NAMES` 添加中文名
+   - `TV_FORMULAS` 添加 TV 公式
+
+---
+
+## 12. 高效开发流程总结
+
+### 12.1 为什么 17 个股指能快速添加？
+
+| 因素 | 说明 |
+|------|------|
+| **踩坑经验文档化** | 之前的失败记录在知识库，避免重复犯错 |
+| **先创建公式文档** | 让用户先测试 TV 公式，避免返工 |
+| **本地构建验证** | 每次改动后立即 `npm run build` |
+| **同步两处公式逻辑** | 记住 `calc_synthetic_indices` 和 `apply_formula` 必须同步 |
+| **增量而非重写** | 只添加新代码，不改动原有逻辑 |
+
+### 12.2 添加新品种的标准流程
+
+```
+1. 讨论需求 → 确定品种列表和计价币种
+2. 创建公式文档 → 用户在 TV 测试
+3. 用户确认通过 → 开始写代码
+4. 后端 godview.py:
+   - SYMBOLS_MAP (Yahoo Ticker)
+   - calc_synthetic_indices (公式)
+   - apply_formula (公式，同步！)
+5. 前端 page.tsx:
+   - SYMBOL_NAMES (中文名)
+   - TV_FORMULAS (TV 公式)
+6. 本地构建 → git push → 触发 Actions → Vercel 部署
+```
+
+### 12.3 核心检查清单
+
+- [ ] 计价币种确认正确（USD/EUR/GBP/JPY/其他）
+- [ ] TV 公式用户测试通过
+- [ ] `calc_synthetic_indices` 已添加公式
+- [ ] `apply_formula` **已同步添加公式**
+- [ ] `SYMBOL_NAMES` 已添加中文名
+- [ ] `TV_FORMULAS` 已添加 TV 公式
+- [ ] 本地 `npm run build` 成功
+- [ ] `git push` 后等待 GitHub Actions 完成
+
+---
+
 ## 附录: 关键文件清单
 
 | 文件 | 用途 |
@@ -434,8 +524,9 @@ vercel --prod --yes
 | `.github/workflows/update_godview.yml` | 定时任务配置 |
 | `engine/requirements.txt` | Python 依赖 |
 | `TAIXI 指数.txt` | 货币指数公式参考 |
+| `股指综合指数公式.md` | 股指公式参考 |
 
 ---
 
-**最后更新**: 2026-01-14
+**最后更新**: 2026-01-15
 

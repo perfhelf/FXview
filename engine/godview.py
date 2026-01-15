@@ -35,7 +35,7 @@ SYMBOLS_MAP = {
     'USD': 'DX-Y.NYB',
     # Stock Indices
     'HKD': 'USDHKD=X',  # For HK50 conversion
-    'CN50': 'XIN9.FGI',
+    'CN50': '2823.HK',  # iShares FTSE China A50 ETF (XIN9.FGI has no data)
     'HK50': '^HSI',
     'SG30': '^STI',
     'ASX200': '^AXJO',
@@ -733,7 +733,9 @@ def main():
         # Dynamic minimum length check
         # Commodities and Emerging currencies might have shorter history in Yahoo
         min_len = 200
-        if symbol in ['XAU', 'XAG', 'XCU', 'ZAR', 'KRW', 'BRL']:
+        if symbol in ['XAU', 'XAG', 'XCU', 'ZAR', 'KRW', 'BRL',
+                       'CN50', 'HK50', 'SG30', 'ASX200', 'CA60', 'NL25', 'FRA40', 'GER40',
+                       'EUSTX50', 'IT40', 'SWI20', 'UK100', 'SPX500', 'NDQ100', 'US2000', 'US30', 'JPN225']:
             min_len = 50
 
         if len(s_close) < min_len:
