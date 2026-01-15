@@ -32,7 +32,26 @@ SYMBOLS_MAP = {
     'ZAR': 'USDZAR=X',
     'KRW': 'USDKRW=X',
     'BRL': 'USDBRL=X',
-    'USD': 'DX-Y.NYB' 
+    'USD': 'DX-Y.NYB',
+    # Stock Indices
+    'HKD': 'USDHKD=X',  # For HK50 conversion
+    'CN50': 'XIN9.FGI',
+    'HK50': '^HSI',
+    'SG30': '^STI',
+    'ASX200': '^AXJO',
+    'CA60': '^GSPTSE',
+    'NL25': '^AEX',
+    'FRA40': '^FCHI',
+    'GER40': '^GDAXI',
+    'EUSTX50': '^STOXX50E',
+    'IT40': 'FTSEMIB.MI',
+    'SWI20': '^SSMI',
+    'UK100': '^FTSE',
+    'SPX500': '^GSPC',
+    'NDQ100': '^NDX',
+    'US2000': '^RUT',
+    'US30': '^DJI',
+    'JPN225': '^N225',
 }
 
 # ==========================================
@@ -99,8 +118,28 @@ def calc_synthetic_indices(data):
     krw = get_c(SYMBOLS_MAP['KRW'])
     brl = get_c(SYMBOLS_MAP['BRL'])
     usd = get_c(SYMBOLS_MAP['USD'])
+    # Stock Indices
+    hkd = get_c(SYMBOLS_MAP['HKD'])
+    cn50_raw = get_c(SYMBOLS_MAP['CN50'])
+    hk50_raw = get_c(SYMBOLS_MAP['HK50'])
+    sg30_raw = get_c(SYMBOLS_MAP['SG30'])
+    asx200_raw = get_c(SYMBOLS_MAP['ASX200'])
+    ca60_raw = get_c(SYMBOLS_MAP['CA60'])
+    nl25_raw = get_c(SYMBOLS_MAP['NL25'])
+    fra40_raw = get_c(SYMBOLS_MAP['FRA40'])
+    ger40_raw = get_c(SYMBOLS_MAP['GER40'])
+    eustx50_raw = get_c(SYMBOLS_MAP['EUSTX50'])
+    it40_raw = get_c(SYMBOLS_MAP['IT40'])
+    swi20_raw = get_c(SYMBOLS_MAP['SWI20'])
+    uk100_raw = get_c(SYMBOLS_MAP['UK100'])
+    spx500_raw = get_c(SYMBOLS_MAP['SPX500'])
+    ndq100_raw = get_c(SYMBOLS_MAP['NDQ100'])
+    us2000_raw = get_c(SYMBOLS_MAP['US2000'])
+    us30_raw = get_c(SYMBOLS_MAP['US30'])
+    jpn225_raw = get_c(SYMBOLS_MAP['JPN225'])
 
     indices = {}
+    # Currency Indices (existing)
     indices['AUD'] = aud/0.66047 + (cad*aud)/0.90476 + (aud/eur)/0.61763 + (aud/gbp)/0.53138 + (aud*jpy)/94.23133
     indices['CAD'] = (1/cad)/0.72965 + (1/(cad*aud))/1.1055 + (1/(eur*cad))/0.68211 + (1/(gbp*cad))/0.58657 + (jpy/cad)/104.165
     indices['CHF'] = (1/chf)/1.12406 + (cad/chf)/1.54202 + (1/(eur*chf))/1.05058 + (1/(chf*gbp))/0.90315 + (jpy/chf)/160.83167
@@ -121,6 +160,42 @@ def calc_synthetic_indices(data):
     indices['ZAR'] = (1/zar)/0.06109 + (eur/zar)/0.07116 + (gbp/zar)/0.08210 + (jpy/zar)/9.688 + (aud/zar)/0.04080
     indices['KRW'] = (1/krw)/0.000682 + (eur/krw)/0.000794 + (gbp/krw)/0.000916 + (jpy/krw)/0.10818 + (aud/krw)/0.000455
     indices['BRL'] = (1/brl)/0.1858 + (eur/brl)/0.2165 + (gbp/brl)/0.2498 + (jpy/brl)/29.47 + (aud/brl)/0.1241
+    
+    # Stock Indices (new) - TAIXI multi-currency approach
+    # CN50 (USD priced from Yahoo XIN9.FGI)
+    indices['CN50'] = cn50_raw/13830 + (cn50_raw/eur)/14798 + (cn50_raw/gbp)/17560 + (cn50_raw*jpy)/1977690 + (cn50_raw/aud)/20954
+    # HK50 (HKD priced)
+    indices['HK50'] = (hk50_raw/hkd)/2594 + (hk50_raw/hkd/eur)/2776 + (hk50_raw/hkd/gbp)/3294 + (hk50_raw/hkd*jpy)/370922 + (hk50_raw/hkd/aud)/3930
+    # SG30 (SGD priced)
+    indices['SG30'] = (sg30_raw/sgd)/296 + (sg30_raw/sgd/eur)/317 + (sg30_raw/sgd/gbp)/376 + (sg30_raw/sgd*jpy)/42328 + (sg30_raw/sgd/aud)/448
+    # ASX200 (AUD priced)
+    indices['ASX200'] = (asx200_raw*aud)/5511 + (asx200_raw*aud/eur)/5897 + (asx200_raw*aud/gbp)/6999 + (asx200_raw*aud*jpy)/788073 + asx200_raw/8350
+    # CA60 (CAD priced)
+    indices['CA60'] = (ca60_raw/cad)/18613 + (ca60_raw/cad/eur)/19916 + (ca60_raw/cad/gbp)/23638 + (ca60_raw/cad*jpy)/2661659 + (ca60_raw/cad/aud)/28201
+    # NL25 (EUR priced)
+    indices['NL25'] = (nl25_raw*eur)/984 + nl25_raw/920 + (nl25_raw*eur/gbp)/1250 + (nl25_raw*eur*jpy)/140712 + (nl25_raw*eur/aud)/1491
+    # FRA40 (EUR priced)
+    indices['FRA40'] = (fra40_raw*eur)/8507 + fra40_raw/7950 + (fra40_raw*eur/gbp)/10804 + (fra40_raw*eur*jpy)/1216499 + (fra40_raw*eur/aud)/12889
+    # GER40 (EUR priced)
+    indices['GER40'] = (ger40_raw*eur)/22256 + ger40_raw/20800 + (ger40_raw*eur/gbp)/28265 + (ger40_raw*eur*jpy)/3182608 + (ger40_raw*eur/aud)/33721
+    # EUSTX50 (EUR priced)
+    indices['EUSTX50'] = (eustx50_raw*eur)/5511 + eustx50_raw/5150 + (eustx50_raw*eur/gbp)/6999 + (eustx50_raw*eur*jpy)/788073 + (eustx50_raw*eur/aud)/8350
+    # IT40 (EUR priced)
+    indices['IT40'] = (it40_raw*eur)/38520 + it40_raw/36000 + (it40_raw*eur/gbp)/48920 + (it40_raw*eur*jpy)/5508360 + (it40_raw*eur/aud)/58364
+    # SWI20 (CHF priced)
+    indices['SWI20'] = (swi20_raw/chf)/13483 + (swi20_raw/chf/eur)/14427 + (swi20_raw/chf/gbp)/17123 + (swi20_raw/chf*jpy)/1928049 + (swi20_raw/chf/aud)/20428
+    # UK100 (GBP priced)
+    indices['UK100'] = (uk100_raw*gbp)/10605 + (uk100_raw*gbp/eur)/11347 + uk100_raw/8350 + (uk100_raw*gbp*jpy)/1516515 + (uk100_raw*gbp/aud)/16068
+    # SPX500 (USD priced)
+    indices['SPX500'] = spx500_raw/5950 + (spx500_raw/eur)/6367 + (spx500_raw/gbp)/7557 + (spx500_raw*jpy)/850850 + (spx500_raw/aud)/9015
+    # NDQ100 (USD priced)
+    indices['NDQ100'] = ndq100_raw/21000 + (ndq100_raw/eur)/22470 + (ndq100_raw/gbp)/26670 + (ndq100_raw*jpy)/3003000 + (ndq100_raw/aud)/31818
+    # US2000 (USD priced)
+    indices['US2000'] = us2000_raw/2250 + (us2000_raw/eur)/2408 + (us2000_raw/gbp)/2858 + (us2000_raw*jpy)/321750 + (us2000_raw/aud)/3409
+    # US30 (USD priced)
+    indices['US30'] = us30_raw/43000 + (us30_raw/eur)/46010 + (us30_raw/gbp)/54610 + (us30_raw*jpy)/6149000 + (us30_raw/aud)/65152
+    # JPN225 (JPY priced)
+    indices['JPN225'] = (jpn225_raw/jpy)/269 + (jpn225_raw/jpy/eur)/288 + (jpn225_raw/jpy/gbp)/342 + jpn225_raw/38500 + (jpn225_raw/jpy/aud)/408
 
     return pd.DataFrame(indices)
 
@@ -576,15 +651,29 @@ def main():
         krw = series_getter(SYMBOLS_MAP['KRW'])
         brl = series_getter(SYMBOLS_MAP['BRL'])
         usd = series_getter(SYMBOLS_MAP['USD'])
+        # Stock Indices
+        hkd = series_getter(SYMBOLS_MAP['HKD'])
+        cn50_raw = series_getter(SYMBOLS_MAP['CN50'])
+        hk50_raw = series_getter(SYMBOLS_MAP['HK50'])
+        sg30_raw = series_getter(SYMBOLS_MAP['SG30'])
+        asx200_raw = series_getter(SYMBOLS_MAP['ASX200'])
+        ca60_raw = series_getter(SYMBOLS_MAP['CA60'])
+        nl25_raw = series_getter(SYMBOLS_MAP['NL25'])
+        fra40_raw = series_getter(SYMBOLS_MAP['FRA40'])
+        ger40_raw = series_getter(SYMBOLS_MAP['GER40'])
+        eustx50_raw = series_getter(SYMBOLS_MAP['EUSTX50'])
+        it40_raw = series_getter(SYMBOLS_MAP['IT40'])
+        swi20_raw = series_getter(SYMBOLS_MAP['SWI20'])
+        uk100_raw = series_getter(SYMBOLS_MAP['UK100'])
+        spx500_raw = series_getter(SYMBOLS_MAP['SPX500'])
+        ndq100_raw = series_getter(SYMBOLS_MAP['NDQ100'])
+        us2000_raw = series_getter(SYMBOLS_MAP['US2000'])
+        us30_raw = series_getter(SYMBOLS_MAP['US30'])
+        jpn225_raw = series_getter(SYMBOLS_MAP['JPN225'])
         
         res = {}
+        # Currency Indices
         res['AUD'] = aud/0.66047 + (cad*aud)/0.90476 + (aud/eur)/0.61763 + (aud/gbp)/0.53138 + (aud*jpy)/94.23133
-        res['CAD'] = (1/cad)/0.72965 + (1/(cad*aud))/1.1055 + (1/(eur*cad)/0.68211) + (1/(gbp*cad)/0.58657) + (jpy/cad)/104.165 
-        # Note: CAD formula above had parens slightly diff in original but keeping style consistent with copy-paste from calc_synthetic_indices logic
-        # Original global calc_synthetic_indices line 89: 
-        # indices['CAD'] = (1/cad)/0.72965 + (1/(cad*aud))/1.1055 + (1/(eur*cad))/0.68211 + (1/(gbp*cad))/0.58657 + (jpy/cad)/104.165
-        # The line below uses copied logic (which I should strictly copy from global function)
-        
         res['CAD'] = (1/cad)/0.72965 + (1/(cad*aud))/1.1055 + (1/(eur*cad))/0.68211 + (1/(gbp*cad))/0.58657 + (jpy/cad)/104.165
         res['CHF'] = (1/chf)/1.12406 + (cad/chf)/1.54202 + (1/(eur*chf))/1.05058 + (1/(chf*gbp))/0.90315 + (jpy/chf)/160.83167
         res['JPY'] = (1/jpy)/0.00703 + (1/(jpy*aud))/0.01063 + (cad/jpy)/0.00963 + (1/(jpy*gbp))/0.00566 + (1/(jpy*eur))/0.00656
@@ -604,6 +693,24 @@ def main():
         res['ZAR'] = (1/zar)/0.06109 + (eur/zar)/0.07116 + (gbp/zar)/0.08210 + (jpy/zar)/9.688 + (aud/zar)/0.04080
         res['KRW'] = (1/krw)/0.000682 + (eur/krw)/0.000794 + (gbp/krw)/0.000916 + (jpy/krw)/0.10818 + (aud/krw)/0.000455
         res['BRL'] = (1/brl)/0.1858 + (eur/brl)/0.2165 + (gbp/brl)/0.2498 + (jpy/brl)/29.47 + (aud/brl)/0.1241
+        # Stock Indices
+        res['CN50'] = cn50_raw/13830 + (cn50_raw/eur)/14798 + (cn50_raw/gbp)/17560 + (cn50_raw*jpy)/1977690 + (cn50_raw/aud)/20954
+        res['HK50'] = (hk50_raw/hkd)/2594 + (hk50_raw/hkd/eur)/2776 + (hk50_raw/hkd/gbp)/3294 + (hk50_raw/hkd*jpy)/370922 + (hk50_raw/hkd/aud)/3930
+        res['SG30'] = (sg30_raw/sgd)/296 + (sg30_raw/sgd/eur)/317 + (sg30_raw/sgd/gbp)/376 + (sg30_raw/sgd*jpy)/42328 + (sg30_raw/sgd/aud)/448
+        res['ASX200'] = (asx200_raw*aud)/5511 + (asx200_raw*aud/eur)/5897 + (asx200_raw*aud/gbp)/6999 + (asx200_raw*aud*jpy)/788073 + asx200_raw/8350
+        res['CA60'] = (ca60_raw/cad)/18613 + (ca60_raw/cad/eur)/19916 + (ca60_raw/cad/gbp)/23638 + (ca60_raw/cad*jpy)/2661659 + (ca60_raw/cad/aud)/28201
+        res['NL25'] = (nl25_raw*eur)/984 + nl25_raw/920 + (nl25_raw*eur/gbp)/1250 + (nl25_raw*eur*jpy)/140712 + (nl25_raw*eur/aud)/1491
+        res['FRA40'] = (fra40_raw*eur)/8507 + fra40_raw/7950 + (fra40_raw*eur/gbp)/10804 + (fra40_raw*eur*jpy)/1216499 + (fra40_raw*eur/aud)/12889
+        res['GER40'] = (ger40_raw*eur)/22256 + ger40_raw/20800 + (ger40_raw*eur/gbp)/28265 + (ger40_raw*eur*jpy)/3182608 + (ger40_raw*eur/aud)/33721
+        res['EUSTX50'] = (eustx50_raw*eur)/5511 + eustx50_raw/5150 + (eustx50_raw*eur/gbp)/6999 + (eustx50_raw*eur*jpy)/788073 + (eustx50_raw*eur/aud)/8350
+        res['IT40'] = (it40_raw*eur)/38520 + it40_raw/36000 + (it40_raw*eur/gbp)/48920 + (it40_raw*eur*jpy)/5508360 + (it40_raw*eur/aud)/58364
+        res['SWI20'] = (swi20_raw/chf)/13483 + (swi20_raw/chf/eur)/14427 + (swi20_raw/chf/gbp)/17123 + (swi20_raw/chf*jpy)/1928049 + (swi20_raw/chf/aud)/20428
+        res['UK100'] = (uk100_raw*gbp)/10605 + (uk100_raw*gbp/eur)/11347 + uk100_raw/8350 + (uk100_raw*gbp*jpy)/1516515 + (uk100_raw*gbp/aud)/16068
+        res['SPX500'] = spx500_raw/5950 + (spx500_raw/eur)/6367 + (spx500_raw/gbp)/7557 + (spx500_raw*jpy)/850850 + (spx500_raw/aud)/9015
+        res['NDQ100'] = ndq100_raw/21000 + (ndq100_raw/eur)/22470 + (ndq100_raw/gbp)/26670 + (ndq100_raw*jpy)/3003000 + (ndq100_raw/aud)/31818
+        res['US2000'] = us2000_raw/2250 + (us2000_raw/eur)/2408 + (us2000_raw/gbp)/2858 + (us2000_raw*jpy)/321750 + (us2000_raw/aud)/3409
+        res['US30'] = us30_raw/43000 + (us30_raw/eur)/46010 + (us30_raw/gbp)/54610 + (us30_raw*jpy)/6149000 + (us30_raw/aud)/65152
+        res['JPN225'] = (jpn225_raw/jpy)/269 + (jpn225_raw/jpy/eur)/288 + (jpn225_raw/jpy/gbp)/342 + jpn225_raw/38500 + (jpn225_raw/jpy/aud)/408
         return pd.DataFrame(res)
 
     df_high = apply_formula(lambda t: get_col('High', t))

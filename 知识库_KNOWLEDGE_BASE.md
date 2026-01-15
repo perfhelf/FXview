@@ -329,6 +329,101 @@ cd frontend && vercel --prod --yes  # 部署前端
 
 ---
 
+## 10. 踩坑记录与教训
+
+### 10.1 黄金/白银数据缺失问题 (2026-01-14)
+
+**问题**：XAU（黄金）和 XAG（白银）在 Yahoo Finance 上的 Ticker `XAUUSD=X` 和 `XAGUSD=X` 返回空数据，导致后端崩溃。
+
+**原因**：Yahoo Finance 这两个现货 Ticker 数据不稳定/已下架。
+
+**解决方案**：切换到期货合约 Ticker：
+```python
+SYMBOLS_MAP = {
+    'XAU': 'GC=F',  # 黄金期货 (原: XAUUSD=X)
+    'XAG': 'SI=F',  # 白银期货 (原: XAGUSD=X)
+    'XCU': 'HG=F',  # 铜期货 (本就正确)
+}
+```
+
+**教训**：
+- 添加新货币前，先在 Yahoo Finance 网页验证 Ticker 是否有效
+- 期货合约（`=F`）通常比现货（`=X`）更稳定
+
+---
+
+### 10.2 后端 `apply_formula` 逻辑重复问题 (2026-01-14)
+
+**问题**：新增货币后后端报 `KeyError`，但 `calc_synthetic_indices` 函数明明已更新。
+
+**原因**：`godview.py` 中存在**两处**几乎相同的公式计算逻辑：
+1. 全局函数 `calc_synthetic_indices()` — 用于计算 Close 价格指数
+2. `main()` 内部的嵌套函数 `apply_formula()` — 用于计算 High/Low 价格指数
+
+**只更新了前者，忘了后者！**
+
+**解决方案**：确保两处逻辑同步更新，包括：
+- 新增变量获取 (`xau = series_getter(SYMBOLS_MAP['XAU'])`)
+- 新增公式计算 (`res['XAU'] = xau/基准值 + ...`)
+
+**教训**：
+- 搜索 `def ` 和函数名，确认没有重复定义
+- 添加新货币时的完整检查清单应包含"检查 `apply_formula` 嵌套函数"
+
+---
+
+### 10.3 前端 Vercel 部署问题 (2026-01-14)
+
+**问题**：本地 `npm run build` 成功，但 Vercel 部署失败。
+
+**可能原因**：
+1. `package-lock.json` 与 `package.json` 版本不一致
+2. 依赖未正确安装（如 `@dnd-kit/modifiers` 被引用但未安装）
+3. Monorepo 结构下 Vercel 的 Root Directory 配置错误
+
+**解决方案**：
+```bash
+# 删除锁文件，重新生成
+rm frontend/package-lock.json
+cd frontend && npm install
+vercel --prod --yes
+```
+
+**教训**：
+- 添加新依赖后立即本地 `npm run build` 验证
+- 如果 Vercel 失败，先检查是否漏装依赖
+
+---
+
+### 10.4 拖拽功能改崩事故 (2026-01-15)
+
+**问题**：尝试为卡片/表格添加拖拽排序功能，结果导致多个核心功能丢失：
+- ❌ 每张卡片上的周期切换按钮消失（变成全局选择器）
+- ❌ 黑暗模式切换按钮消失
+- ❌ 整体 UI 结构被破坏
+
+**原因**：对 `page.tsx` 进行了**破坏性重写**，而非增量修改。
+
+**正确做法**：
+1. **备份**：`cp page.tsx page.tsx.backup`
+2. **增量添加**：仅在现有组件外层包裹 `DndContext` 和 `useSortable`
+3. **不动内部逻辑**：保留所有原有的子组件、状态、交互
+4. **逐步验证**：
+   - [ ] 卡片周期切换存在
+   - [ ] 黑暗模式按钮存在
+   - [ ] TradingView 链接正常
+   - [ ] 趋势颜色正确
+   - [ ] 拖拽功能正常
+
+**教训**：
+- 大型组件改造必须采用**最小改动原则**
+- 每改一小步就本地测试，确保原有功能不受影响
+- 功能改造前务必 git commit 当前稳定版本
+
+**稳定版本回滚点**：`76dba4a` (fix: switch XAU/XAG to futures)
+
+---
+
 ## 附录: 关键文件清单
 
 | 文件 | 用途 |
