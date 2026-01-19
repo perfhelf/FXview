@@ -537,7 +537,7 @@ export default function Home() {
       <header className="mb-4">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
           <h1 className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent text-center sm:text-left">
-            🌐 鲲侯FXView · 全球汇率上帝视角
+            🌐 鲲侯FXView · 外汇指数上帝视角
           </h1>
           <ThemeToggle />
         </div>

@@ -5,12 +5,15 @@ import { Inter } from 'next/font/google'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: '鲲侯FXView · 全球汇率上帝视角',
-  description: '提供全球汇率实时分析，集成趋势跟随、一浪反转、流动性猎杀三大引擎。通过上帝视角洞察 RSI、MACD、ADX 多周期信号，助您精准把握市场脉搏。',
-  keywords: 'FXView, 鲲侯, 汇率分析, 外汇交易, 趋势跟随, 一浪反转, 上帝视角, 交易信号, RSI, MACD, ADX, 全球汇率',
+  title: '鲲侯FXView · 外汇指数上帝视角',
+  description: '提供全球外汇、股指及贵金属实时分析，集成趋势跟随、一浪反转、流动性猎杀三大引擎。通过上帝视角洞察 RSI、MACD、ADX 多周期信号，助您精准把握全球市场脉搏。',
+  keywords: 'FXView, 鲲侯, 汇率分析, 外汇交易, 股指行情, 贵金属交易, 趋势跟随, 一浪反转, 上帝视角, 交易信号, RSI, MACD, ADX, 全球指数',
+  icons: {
+    icon: '/logo.svg',
+  },
   openGraph: {
-    title: '鲲侯FXView · 全球汇率上帝视角',
-    description: '提供全球汇率实时分析，集成趋势跟随、一浪反转、流动性猎杀三大引擎。',
+    title: '鲲侯FXView · 外汇指数上帝视角',
+    description: '提供全球外汇、股指及贵金属实时分析，集成趋势跟随、一浪反转、流动性猎杀三大引擎。',
     type: 'website',
   },
 }
