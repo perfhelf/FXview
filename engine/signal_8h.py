@@ -338,6 +338,129 @@ def download_1h_data(tickers):
     return ticker_data
 
 
+# ==========================================
+# 1H Data Archive Layer (Supabase)
+# ==========================================
+
+def archive_to_supabase(ticker_data, sb):
+    """
+    Upsert downloaded 1H OHLC data to ohlc_1h_archive table.
+    This accumulates data over time beyond Yahoo's 60-day limit.
+    """
+    total_rows = 0
+    for ticker, df in ticker_data.items():
+        if df.empty:
+            continue
+        
+        # Prepare rows for upsert
+        rows = []
+        for ts, row in df.iterrows():
+            # Normalize timestamp to naive UTC string
+            if hasattr(ts, 'tz') and ts.tz is not None:
+                ts_str = ts.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ')
+            else:
+                ts_str = ts.strftime('%Y-%m-%dT%H:%M:%SZ')
+            
+            rows.append({
+                'ticker': ticker,
+                'ts': ts_str,
+                'open': float(row['Open']),
+                'high': float(row['High']),
+                'low': float(row['Low']),
+                'close': float(row['Close']),
+            })
+        
+        # Batch upsert in chunks of 500
+        for i in range(0, len(rows), 500):
+            chunk = rows[i:i+500]
+            try:
+                sb.table('ohlc_1h_archive').upsert(chunk, on_conflict='ticker,ts').execute()
+                total_rows += len(chunk)
+            except Exception as e:
+                print(f"    ⚠️ Archive upsert failed for {ticker} (chunk {i}): {e}")
+    
+    return total_rows
+
+
+def load_from_archive(tickers, sb):
+    """
+    Load up to 1 year of 1H data from the archive table.
+    Returns dict mapping ticker → DataFrame with OHLC columns.
+    """
+    cutoff = (datetime.utcnow() - timedelta(days=365)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    archive_data = {}
+    
+    for ticker in tickers:
+        try:
+            result = sb.table('ohlc_1h_archive') \
+                .select('ts,open,high,low,close') \
+                .eq('ticker', ticker) \
+                .gte('ts', cutoff) \
+                .order('ts') \
+                .execute()
+            
+            if result.data:
+                records = result.data
+                df = pd.DataFrame(records)
+                df['ts'] = pd.to_datetime(df['ts'], utc=True)
+                df = df.set_index('ts')
+                df.columns = ['Open', 'High', 'Low', 'Close']
+                df = df.astype(float)
+                archive_data[ticker] = df
+        except Exception as e:
+            # Silently skip — will fall back to Yahoo data
+            pass
+    
+    return archive_data
+
+
+def cleanup_old_archive(sb):
+    """
+    Delete archive rows older than 1 year.
+    Returns number of deleted rows.
+    """
+    cutoff = (datetime.utcnow() - timedelta(days=365)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    try:
+        result = sb.table('ohlc_1h_archive') \
+            .delete() \
+            .lt('ts', cutoff) \
+            .execute()
+        deleted = len(result.data) if result.data else 0
+        return deleted
+    except Exception as e:
+        print(f"    ⚠️ Cleanup failed: {e}")
+        return 0
+
+
+def merge_ticker_data(yahoo_data, archive_data):
+    """
+    Merge Yahoo (fresh, 60-day) with archive (accumulated, up to 1 year).
+    Archive is the base; Yahoo data overwrites for the overlap period
+    (Yahoo is always fresher for recent bars).
+    """
+    merged = {}
+    all_tickers = set(list(yahoo_data.keys()) + list(archive_data.keys()))
+    
+    for ticker in all_tickers:
+        yahoo_df = yahoo_data.get(ticker, pd.DataFrame())
+        archive_df = archive_data.get(ticker, pd.DataFrame())
+        
+        if yahoo_df.empty and archive_df.empty:
+            continue
+        elif yahoo_df.empty:
+            merged[ticker] = archive_df
+        elif archive_df.empty:
+            merged[ticker] = yahoo_df
+        else:
+            # Combine: archive as base, Yahoo overwrites overlap
+            combined = pd.concat([archive_df, yahoo_df])
+            combined = combined[~combined.index.duplicated(keep='last')]  # Yahoo wins
+            combined = combined.sort_index()
+            merged[ticker] = combined
+    
+    return merged
+
+
 def compute_synthetic_ohlc(num_df, den_df, operation):
     """
     Compute synthetic OHLC from two instruments.
@@ -829,37 +952,67 @@ def main():
     if is_manual:
         print("  → Manual trigger: freshness gate BYPASSED")
     
+    # Initialize Supabase client
+    sb = None
+    if SUPABASE_URL and SUPABASE_KEY:
+        sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+    
     # 1. Determine all tickers needed
     all_tickers = get_all_yahoo_tickers()
-    print(f"\nStep 1: Downloading 1H data for {len(all_tickers)} Yahoo tickers...")
+    print(f"\nStep 1: Downloading 1H data from Yahoo Finance ({len(all_tickers)} tickers)...")
     
-    # 2. Download 1H data with fallback
-    ticker_data = download_1h_data(all_tickers)
+    # 2. Download fresh 1H data from Yahoo (60-day window)
+    yahoo_data = download_1h_data(all_tickers)
     
-    if not ticker_data:
+    if not yahoo_data:
         print("ERROR: No data returned from Yahoo Finance!")
         return
     
-    print(f"  → Total available: {len(ticker_data)} tickers")
+    print(f"  → Yahoo data: {len(yahoo_data)} tickers")
     
     # 3. Freshness Gate — "Get then Push"
     if not is_manual:
         print(f"\nFreshness Gate: checking if 8H candle has renewed...")
-        is_fresh = check_data_freshness(ticker_data, expected_close)
+        is_fresh = check_data_freshness(yahoo_data, expected_close)
         if not is_fresh:
             print("  ⏸  Data NOT yet renewed for this 8H window. Skipping push.")
             print("  → This is normal on weekends/holidays. Will retry next cron.")
             return
-        print("  ✅ Data is FRESH — proceeding to compute & push.")
+        print("  ✅ Data is FRESH — proceeding to archive, compute & push.")
     
-    # 3. Process each symbol
+    # 4. Archive — upsert Yahoo data to Supabase for accumulation
+    if sb:
+        print(f"\nStep 2: Archiving 1H data to Supabase (incremental upsert)...")
+        archived_rows = archive_to_supabase(yahoo_data, sb)
+        print(f"  → Archived {archived_rows} rows")
+    
+    # 5. Load full archive (up to 1 year of accumulated data)
+    archive_data = {}
+    if sb:
+        print(f"\nStep 3: Loading 1H archive from Supabase (up to 1 year)...")
+        archive_data = load_from_archive(all_tickers, sb)
+        print(f"  → Archive data: {len(archive_data)} tickers")
+        if archive_data:
+            sample_ticker = next(iter(archive_data))
+            sample_len = len(archive_data[sample_ticker])
+            print(f"  → Sample depth [{sample_ticker}]: {sample_len} bars")
+    
+    # 6. Merge: archive (deep) + Yahoo (fresh) → full dataset
+    if archive_data:
+        ticker_data = merge_ticker_data(yahoo_data, archive_data)
+        print(f"  → Merged: {len(ticker_data)} tickers (archive + Yahoo)")
+    else:
+        ticker_data = yahoo_data
+        print(f"  → Using Yahoo data only: {len(ticker_data)} tickers")
+    
+    # 7. Process each symbol
     results = {}
     success_count = 0
     skip_count = 0
     error_count = 0
     
     all_symbols = list(YAHOO_TICKERS.keys()) + list(SYNTHETIC_PAIRS.keys())
-    print(f"\nStep 2: Processing {len(all_symbols)} symbols on 8H timeframe...")
+    print(f"\nStep 4: Processing {len(all_symbols)} symbols on 8H timeframe...")
     
     for symbol in all_symbols:
         try:
@@ -927,17 +1080,15 @@ def main():
             traceback.print_exc()
             error_count += 1
     
-    # 4. Summary
+    # 8. Summary
     print(f"\n{'=' * 60}")
     print(f"Results: {success_count} success, {skip_count} skipped, {error_count} errors")
     print(f"{'=' * 60}")
     
-    # 5. Push to Supabase
-    if SUPABASE_URL and SUPABASE_KEY:
-        print("\nStep 3: Pushing results to Supabase...")
+    # 9. Push signals to Supabase
+    if sb:
+        print("\nStep 5: Pushing signal results to Supabase...")
         try:
-            sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-            
             for sym, data in results.items():
                 def clean_nan(obj):
                     if isinstance(obj, (float, np.floating)):
@@ -962,10 +1113,16 @@ def main():
                 }).execute()
             
             print(f"  → Pushed {len(results)} records to Supabase")
-            print("Done. ✅")
         except Exception as e:
             print(f"  ❌ Supabase push failed: {e}")
             traceback.print_exc()
+        
+        # 10. Cleanup — delete archive data older than 1 year
+        print("\nStep 6: Cleaning up old archive data (>1 year)...")
+        deleted = cleanup_old_archive(sb)
+        print(f"  → Deleted {deleted} old rows")
+        
+        print("\nDone. ✅")
     else:
         print("\nNo Supabase credentials found. Dumping JSON to stdout:")
         print(json.dumps(results, default=str, indent=2, ensure_ascii=False))
