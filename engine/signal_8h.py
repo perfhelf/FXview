@@ -385,23 +385,39 @@ def archive_to_supabase(ticker_data, sb):
 def load_from_archive(tickers, sb):
     """
     Load up to 1 year of 1H data from the archive table.
+    Uses pagination to bypass Supabase's 1000-row default limit.
     Returns dict mapping ticker → DataFrame with OHLC columns.
     """
     cutoff = (datetime.utcnow() - timedelta(days=365)).strftime('%Y-%m-%dT%H:%M:%SZ')
     archive_data = {}
+    PAGE_SIZE = 1000
     
     for ticker in tickers:
         try:
-            result = sb.table('ohlc_1h_archive') \
-                .select('ts,open,high,low,close') \
-                .eq('ticker', ticker) \
-                .gte('ts', cutoff) \
-                .order('ts') \
-                .execute()
+            all_records = []
+            offset = 0
             
-            if result.data:
-                records = result.data
-                df = pd.DataFrame(records)
+            while True:
+                result = sb.table('ohlc_1h_archive') \
+                    .select('ts,open,high,low,close') \
+                    .eq('ticker', ticker) \
+                    .gte('ts', cutoff) \
+                    .order('ts') \
+                    .range(offset, offset + PAGE_SIZE - 1) \
+                    .execute()
+                
+                if not result.data:
+                    break
+                
+                all_records.extend(result.data)
+                
+                if len(result.data) < PAGE_SIZE:
+                    break  # Last page
+                
+                offset += PAGE_SIZE
+            
+            if all_records:
+                df = pd.DataFrame(all_records)
                 df['ts'] = pd.to_datetime(df['ts'], utc=True)
                 df = df.set_index('ts')
                 df.columns = ['Open', 'High', 'Low', 'Close']
