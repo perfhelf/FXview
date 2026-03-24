@@ -164,26 +164,106 @@ def get_1h_ohlc(ticker, raw_data):
     """
     Extract 1H OHLC for a single ticker from the batch download.
     
+    Handles all yfinance column formats:
+      - MultiIndex (Price, Ticker): raw_data['Open']['GC=F']
+      - MultiIndex (Ticker, Price): raw_data['GC=F']['Open']
+      - Flat columns (single ticker): raw_data['Open']
+    
     Args:
         ticker: Yahoo ticker string
-        raw_data: Multi-level DataFrame from yf.download()
+        raw_data: DataFrame from yf.download()
     
     Returns:
         DataFrame with Open, High, Low, Close columns
     """
     try:
         if isinstance(raw_data.columns, pd.MultiIndex):
-            df = pd.DataFrame({
-                'Open': raw_data['Open'][ticker],
-                'High': raw_data['High'][ticker],
-                'Low': raw_data['Low'][ticker],
-                'Close': raw_data['Close'][ticker],
-            })
+            level_0_values = raw_data.columns.get_level_values(0).unique().tolist()
+            ohlc_names = {'Open', 'High', 'Low', 'Close', 'Volume', 'Adj Close'}
+            
+            if set(level_0_values) & ohlc_names:
+                # Format: (Price, Ticker) — e.g., ('Open', 'GC=F')
+                df = pd.DataFrame({
+                    'Open': raw_data['Open'][ticker],
+                    'High': raw_data['High'][ticker],
+                    'Low': raw_data['Low'][ticker],
+                    'Close': raw_data['Close'][ticker],
+                })
+            else:
+                # Format: (Ticker, Price) — e.g., ('GC=F', 'Open')
+                df = pd.DataFrame({
+                    'Open': raw_data[ticker]['Open'],
+                    'High': raw_data[ticker]['High'],
+                    'Low': raw_data[ticker]['Low'],
+                    'Close': raw_data[ticker]['Close'],
+                })
         else:
+            # Flat columns (single ticker download)
             df = raw_data[['Open', 'High', 'Low', 'Close']].copy()
         return df.dropna()
-    except (KeyError, TypeError):
+    except (KeyError, TypeError) as e:
         return pd.DataFrame()
+
+
+def download_1h_data(tickers):
+    """
+    Download 1H data for all tickers. Uses batch download first,
+    falls back to individual downloads if batch fails.
+    
+    Returns:
+        Dict mapping ticker → DataFrame with OHLC columns
+    """
+    ticker_data = {}
+    
+    # Try batch download first
+    print("  Attempting batch download...")
+    try:
+        raw_data = yf.download(
+            tickers,
+            period="60d",
+            interval="1h",
+            progress=False,
+            group_by='ticker' if len(tickers) > 1 else None,
+        )
+        
+        if not raw_data.empty:
+            print(f"  → Batch downloaded {len(raw_data)} rows")
+            # Debug: Show column structure
+            if isinstance(raw_data.columns, pd.MultiIndex):
+                print(f"  → MultiIndex columns. Levels: {raw_data.columns.names}")
+                sample_cols = raw_data.columns[:6].tolist()
+                print(f"  → Sample columns: {sample_cols}")
+            
+            # Extract each ticker
+            for ticker in tickers:
+                df = get_1h_ohlc(ticker, raw_data)
+                if not df.empty:
+                    ticker_data[ticker] = df
+            
+            print(f"  → Extracted {len(ticker_data)}/{len(tickers)} tickers from batch")
+    except Exception as e:
+        print(f"  ⚠️ Batch download failed: {e}")
+    
+    # Fall back to individual downloads for missing tickers
+    missing_tickers = [t for t in tickers if t not in ticker_data]
+    if missing_tickers:
+        print(f"  → Individual download for {len(missing_tickers)} missing tickers...")
+        for ticker in missing_tickers:
+            try:
+                df = yf.download(
+                    ticker,
+                    period="60d",
+                    interval="1h",
+                    progress=False,
+                )
+                if not df.empty:
+                    df = df[['Open', 'High', 'Low', 'Close']].dropna()
+                    if not df.empty:
+                        ticker_data[ticker] = df
+            except Exception as e:
+                print(f"    ⚠️ {ticker}: {e}")
+    
+    return ticker_data
 
 
 def compute_synthetic_ohlc(num_df, den_df, operation):
@@ -672,21 +752,14 @@ def main():
     all_tickers = get_all_yahoo_tickers()
     print(f"\nStep 1: Downloading 1H data for {len(all_tickers)} Yahoo tickers...")
     
-    # 2. Download 1H data (max 730 days for 1h interval on Yahoo)
-    # yfinance 1h: max period is "730d", but for stability use 90d
-    raw_data = yf.download(
-        all_tickers,
-        period="60d",
-        interval="1h",
-        progress=False,
-        group_by='ticker' if len(all_tickers) > 1 else None,
-    )
+    # 2. Download 1H data with fallback
+    ticker_data = download_1h_data(all_tickers)
     
-    if raw_data.empty:
+    if not ticker_data:
         print("ERROR: No data returned from Yahoo Finance!")
         return
     
-    print(f"  → Downloaded {len(raw_data)} rows")
+    print(f"  → Total available: {len(ticker_data)} tickers")
     
     # 3. Process each symbol
     results = {}
@@ -699,15 +772,16 @@ def main():
     
     for symbol in all_symbols:
         try:
-            # Get 1H OHLC
+            # Get 1H OHLC from pre-downloaded ticker data
+            df_1h = pd.DataFrame()
             if symbol in YAHOO_TICKERS:
                 ticker = YAHOO_TICKERS[symbol]
-                df_1h = get_1h_ohlc(ticker, raw_data)
+                df_1h = ticker_data.get(ticker, pd.DataFrame())
             else:
                 # Synthetic pair
                 num_ticker, den_ticker, operation = SYNTHETIC_PAIRS[symbol]
-                num_1h = get_1h_ohlc(num_ticker, raw_data)
-                den_1h = get_1h_ohlc(den_ticker, raw_data)
+                num_1h = ticker_data.get(num_ticker, pd.DataFrame())
+                den_1h = ticker_data.get(den_ticker, pd.DataFrame())
                 
                 if num_1h.empty or den_1h.empty:
                     print(f"  ⚠️  {symbol}: Missing component data for synthetic pair")
