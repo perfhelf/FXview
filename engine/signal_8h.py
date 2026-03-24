@@ -1,16 +1,54 @@
 """
 鲲侯 FXview — 8H Signal Engine (signal_8h.py)
 =============================================
-Calculates trend-following (趋势跟随) and first-wave (第一浪) signals
-on 8H timeframe for 53 EIGHTCAP instruments.
 
-Architecture:
-  1. Fetch 1H OHLC data from Yahoo Finance
-  2. Synthesize 8H candles (UTC 00-08, 08-16, 16-24)
-  3. Compute RSI / MACD / ADX soldiers → Commander aggregation
-  4. Push static results to Supabase `signal_8h` table
+核心功能 / Core Purpose:
+    为 53 个 EIGHTCAP 交易品种计算 8H 级别的趋势和一浪信号。
+    Computes trend-following and first-wave signals on the 8H timeframe
+    for 53 EIGHTCAP trading instruments.
 
-Schedule: 2x/day via GitHub Actions (UTC 00:00 and 12:00)
+信号输出 / Signal Output:
+    每个品种输出 2 个信号，各有 3 种状态：
+    Each instrument outputs 2 signals, each with 3 possible states:
+
+    ┌──────────────┬───────────────────────────────────────────┐
+    │ trend        │ 趋势跟随方向: "多" (long) / "空" (short) / "等待" (wait)   │
+    │ first_wave   │ 第一浪方向:   "多" (long) / "空" (short) / "等待" (wait)   │
+    └──────────────┴───────────────────────────────────────────┘
+
+算法来源 / Algorithm Origin:
+    移植自 godview.py 的 "鲲侯 S+" 趋势跟随体系 (单 8H 周期版)。
+    趋势跟随: RSI 三兵 + MACD 三兵 + ADX 三兵 → 指挥官聚合
+    第一浪:   RSI 369-SMA + MACD 斜率 + ADX 位置矩阵 → 指挥官聚合
+    Ported from godview.py "Kun Hou S+" trend-following system (single 8H TF).
+    Trend: RSI 3-soldier + MACD 3-soldier + ADX 3-soldier → Commander aggregation
+    First Wave: RSI 369-SMA + MACD slope + ADX position matrix → Commander
+
+数据流 / Data Pipeline (6 Steps):
+    ┌────────────────────────────────────────────────────────────────────────┐
+    │ Step 1: Yahoo Finance 下载最新 60 天 1H 数据 (batch + individual fallback)│
+    │ Step 2: 增量归档到 Supabase ohlc_1h_archive 表 (1年保留, >1年自动清理)   │
+    │ Step 3: 从归档表加载完整 1 年 1H 历史 (分页读取, 突破60天限制)            │
+    │ Step 4: 归档数据 + Yahoo 数据合并 → 合成 8H K线 → 计算信号               │
+    │ Step 5: 信号结果推送到 Supabase signal_8h 表 (静态 API)                  │
+    │ Step 6: 清理超过 1 年的归档数据                                          │
+    └────────────────────────────────────────────────────────────────────────┘
+
+运行方式 / Execution:
+    GitHub Actions cron 每日 3 次 (对齐 8H K线收盘):
+      UTC 00:30 (北京 08:30) — 对应 16:00-00:00 K线收盘
+      UTC 08:30 (北京 16:30) — 对应 00:00-08:00 K线收盘
+      UTC 16:30 (北京 00:30) — 对应 08:00-16:00 K线收盘
+    含 Freshness Gate: 只有确认 8H K线已收盘才计算和推送。
+    手动触发 (workflow_dispatch) 绕过 Freshness Gate。
+
+消费者 / Consumers:
+    - Next.js API Route: GET /api/signal-8h → 前端 / Swift 客户端读取
+    - AlertDashboard-Swift 客户端 (Phase 2)
+
+Supabase 表结构 / Tables:
+    signal_8h:        symbol(PK), data(JSONB), updated_at
+    ohlc_1h_archive:  ticker+ts(composite PK), open, high, low, close
 """
 
 import os
@@ -32,8 +70,12 @@ SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SU
 # ==========================================
 # EIGHTCAP → Yahoo Finance Ticker Mapping
 # ==========================================
-# Key = EIGHTCAP symbol (without exchange prefix)
-# Value = Yahoo ticker OR "SYNTHETIC" tag for computed pairs
+# 品种映射表: EIGHTCAP 交易品种名称 → Yahoo Finance 代码
+# Key = EIGHTCAP display symbol (e.g., "XAUUSD", "EURAUD")
+# Value = Yahoo ticker string (e.g., "GC=F", "EURAUD=X")
+#
+# 共 49 个直接品种 + 6 个合成品种 = 55 个信号
+# Total: 49 direct + 6 synthetic = 55 signals
 
 # --- Direct Yahoo Tickers ---
 YAHOO_TICKERS = {
@@ -96,9 +138,12 @@ YAHOO_TICKERS = {
     'USDCHF': 'USDCHF=X',
 }
 
-# --- Synthetic Pairs (computed from base tickers) ---
+# --- 合成品种 Synthetic Pairs (Yahoo 不直接提供, 由基础品种计算) ---
+# 这些品种 Yahoo Finance 没有直接数据, 需要用两个基础品种的 OHLC 计算合成
+# These pairs aren't available on Yahoo; computed from two base tickers' OHLC.
 # Format: { symbol: (numerator_ticker, denominator_ticker, operation) }
-# operation: 'divide' = num/den, 'multiply' = num*den
+# operation: 'divide' = num/den (如 XAUAUD = 金价/澳元)
+#            'multiply' = num*den (如 XAUJPY = 金价×美日)
 SYNTHETIC_PAIRS = {
     'XAUAUD': ('GC=F', 'AUDUSD=X', 'divide'),    # Gold/AUD = GC=F / AUDUSD
     'XAUEUR': ('GC=F', 'EURUSD=X', 'divide'),     # Gold/EUR = GC=F / EURUSD
@@ -1067,23 +1112,34 @@ def main():
             s_high = df_8h['High']
             s_low = df_8h['Low']
             
-            # Trend Following
+            # ── 趋势跟随 Trend Following ──
+            # 三兵投票体系: RSI 三兵 + MACD 三兵 + ADX 三兵
+            # 最终由 Commander (指挥官) 聚合:
+            #   1 (多/Long) = 三路全部看多
+            #  -1 (空/Short) = 三路全部看空
+            #   0 (等待/Wait) = 信号不一致, 观望
             rsi_l, rsi_s = calc_rsi_votes(s_close, 3)
             macd_l, macd_s = calc_macd_signal(s_close)
             adx_l, adx_s = calc_adx_signal(s_high, s_low, s_close, 14)
             
             trend_status = calc_trend_aggregation(rsi_l, rsi_s, macd_l, macd_s, adx_l, adx_s)
             
-            # First Wave
+            # ── 第一浪 First Wave ──
+            # 捕捉趋势反转的初始信号 (比趋势跟随更灵敏)
+            # RSI 369-SMA 需要 ≥383 根 8H K线 才能正常计算
+            # 同样由 Commander 聚合: 1=多, -1=空, 0=等待
             fw_status = calc_fw_aggregation(s_close, s_high, s_low)
             
+            # ── 构建信号 Payload ──
+            # 核心字段: trend + first_wave (各只有 "多"/"空"/"等待" 三种状态)
+            # 辅助字段: trend_status, fw_status (数值版), candles_count, last_update
             payload = {
                 "symbol": symbol,
-                "trend": status_to_label(trend_status),
-                "first_wave": status_to_label(fw_status),
-                "trend_status": trend_status,
-                "fw_status": fw_status,
-                "candles_count": len(df_8h),
+                "trend": status_to_label(trend_status),         # "多" / "空" / "等待"
+                "first_wave": status_to_label(fw_status),       # "多" / "空" / "等待"
+                "trend_status": trend_status,                   # 1 / -1 / 0 (数值版)
+                "fw_status": fw_status,                         # 1 / -1 / 0 (数值版)
+                "candles_count": len(df_8h),                    # 8H K线数量 (数据深度)
                 "last_update": datetime.utcnow().isoformat() + "Z",
             }
             
