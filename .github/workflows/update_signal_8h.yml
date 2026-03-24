@@ -1,0 +1,34 @@
+name: Update 8H Signals
+
+on:
+  schedule:
+    # 2x daily: UTC 00:30 and 12:30
+    # (30 min offset to allow markets to settle after 8H candle close)
+    - cron: '30 0 * * *'   # UTC 00:30 → 北京 08:30
+    - cron: '30 12 * * *'  # UTC 12:30 → 北京 20:30
+  workflow_dispatch: # Manual trigger
+
+jobs:
+  update_signals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r engine/requirements.txt
+
+      - name: Run 8H Signal Engine
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python engine/signal_8h.py
