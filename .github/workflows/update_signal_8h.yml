@@ -2,10 +2,10 @@ name: Update 8H Signals
 
 on:
   schedule:
-    # 2x daily: UTC 00:30 and 12:30
-    # (30 min offset to allow markets to settle after 8H candle close)
-    - cron: '30 0 * * *'   # UTC 00:30 → 北京 08:30
-    - cron: '30 12 * * *'  # UTC 12:30 → 北京 20:30
+    # 3x daily: aligned with 8H candle close (UTC 00/08/16 + 30min buffer)
+    - cron: '30 0 * * *'   # 8H candle close UTC 00:00 → run 00:30 → 北京 08:30
+    - cron: '30 8 * * *'   # 8H candle close UTC 08:00 → run 08:30 → 北京 16:30
+    - cron: '30 16 * * *'  # 8H candle close UTC 16:00 → run 16:30 → 北京 00:30
   workflow_dispatch: # Manual trigger
 
 jobs:

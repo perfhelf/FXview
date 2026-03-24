@@ -118,6 +118,78 @@ def get_all_yahoo_tickers():
     return sorted(list(tickers))
 
 # ==========================================
+# 8H Freshness Gate — "Get then Push"
+# ==========================================
+
+def get_expected_8h_close():
+    """
+    Determine the most recent 8H candle close time.
+    
+    8H candle windows (UTC):
+      00:00-08:00 → closes at 08:00
+      08:00-16:00 → closes at 16:00
+      16:00-00:00 → closes at 00:00 (next day)
+    
+    Returns:
+        (expected_close_utc, bucket_start_utc)
+    """
+    now = datetime.utcnow()
+    hour = now.hour
+    
+    # Determine which 8H candle just closed
+    if hour < 8:
+        # The 16:00-00:00 candle closed at today's 00:00
+        close_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        bucket_start = close_time - timedelta(hours=8)
+    elif hour < 16:
+        # The 00:00-08:00 candle closed at today's 08:00
+        close_time = now.replace(hour=8, minute=0, second=0, microsecond=0)
+        bucket_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        # The 08:00-16:00 candle closed at today's 16:00
+        close_time = now.replace(hour=16, minute=0, second=0, microsecond=0)
+        bucket_start = now.replace(hour=8, minute=0, second=0, microsecond=0)
+    
+    return close_time, bucket_start
+
+
+def check_data_freshness(ticker_data, expected_close):
+    """
+    Verify that downloaded data contains candles up to the expected 8H close.
+    
+    Uses FX reference tickers (EURUSD, GBPUSD) since they trade nearly 24h.
+    Returns True if data is fresh enough (has 1H bars within the latest 8H window).
+    """
+    reference_tickers = ['EURUSD=X', 'GBPUSD=X', 'GC=F']  # FX + Gold as fallback
+    
+    for ref_ticker in reference_tickers:
+        if ref_ticker not in ticker_data:
+            continue
+        
+        df = ticker_data[ref_ticker]
+        if df.empty:
+            continue
+        
+        # Get the latest timestamp from the data
+        latest_ts = df.index[-1]
+        if hasattr(latest_ts, 'tz') and latest_ts.tz is not None:
+            latest_ts = latest_ts.tz_convert('UTC').tz_localize(None)
+        
+        # Calculate how stale the data is relative to expected close
+        staleness = expected_close - latest_ts
+        hours_stale = staleness.total_seconds() / 3600
+        
+        print(f"  → Freshness check [{ref_ticker}]: latest={latest_ts}, expected_close={expected_close}, staleness={hours_stale:.1f}h")
+        
+        # Data is fresh if the latest bar is within 4 hours of the expected close
+        # (meaning we have at least half the 8H window filled)
+        if hours_stale <= 4:
+            return True
+    
+    return False
+
+
+# ==========================================
 # 1H → 8H Candle Synthesis
 # ==========================================
 
@@ -748,6 +820,15 @@ def main():
     print(f"Run Time: {datetime.utcnow().isoformat()}Z")
     print("=" * 60)
     
+    # Check if manual trigger (bypass freshness gate)
+    is_manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    
+    # Show expected 8H window
+    expected_close, bucket_start = get_expected_8h_close()
+    print(f"\n8H Window: {bucket_start.strftime('%Y-%m-%d %H:%M')} → {expected_close.strftime('%Y-%m-%d %H:%M')} UTC")
+    if is_manual:
+        print("  → Manual trigger: freshness gate BYPASSED")
+    
     # 1. Determine all tickers needed
     all_tickers = get_all_yahoo_tickers()
     print(f"\nStep 1: Downloading 1H data for {len(all_tickers)} Yahoo tickers...")
@@ -760,6 +841,16 @@ def main():
         return
     
     print(f"  → Total available: {len(ticker_data)} tickers")
+    
+    # 3. Freshness Gate — "Get then Push"
+    if not is_manual:
+        print(f"\nFreshness Gate: checking if 8H candle has renewed...")
+        is_fresh = check_data_freshness(ticker_data, expected_close)
+        if not is_fresh:
+            print("  ⏸  Data NOT yet renewed for this 8H window. Skipping push.")
+            print("  → This is normal on weekends/holidays. Will retry next cron.")
+            return
+        print("  ✅ Data is FRESH — proceeding to compute & push.")
     
     # 3. Process each symbol
     results = {}
