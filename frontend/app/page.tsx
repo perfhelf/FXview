@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from './providers'
 
@@ -46,7 +46,7 @@ const SYMBOL_NAMES: Record<string, string> = {
   AUD: '澳元', CAD: '加元', NZD: '纽元', CHF: '瑞郎',
   SGD: '新元', MXN: '比索', SEK: '瑞典', NOK: '挪威',
   CNH: '人民币', MYR: '林吉特',
-  XAU: '黄金', XAG: '白银', XCU: '铜',
+  XAU: '黄金', XAG: '白银', USO: '原油', XCU: '铜',
   ZAR: '南非兰特', KRW: '韩元', BRL: '雷亚尔',
   // Stock Indices
   CN50: '中国A50', HK50: '恒生指数', SG30: '新加坡30',
@@ -75,6 +75,7 @@ const TV_FORMULAS: Record<string, string> = {
   MYR: '1/USDMYR/0.22371+FX:EURUSD/USDMYR/0.23937+FX:GBPUSD/USDMYR/0.27740+FX:USDJPY/USDMYR/31.99552+FX:AUDUSD/USDMYR/0.14765',
   XAU: 'XAUUSD/4629 + XAUUSD/FX:EURUSD/3973 + XAUUSD/FX:GBPUSD/3444 + XAUUSD*FX:USDJPY/734159 + XAUUSD/FX:AUDUSD/6929',
   XAG: 'XAGUSD/85.23 + XAGUSD/FX:EURUSD/73.16 + XAGUSD/FX:GBPUSD/63.41 + XAGUSD*FX:USDJPY/13517 + XAGUSD/FX:AUDUSD/127.59',
+  USO: 'EIGHTCAP:USOUSD/93 + EIGHTCAP:USOUSD/FX:EURUSD/79.38 + EIGHTCAP:USOUSD/FX:GBPUSD/68.9 + EIGHTCAP:USOUSD*FX:USDJPY/14832 + EIGHTCAP:USOUSD/FX:AUDUSD/129.92',
   XCU: 'HG1!/6.05 + HG1!/FX:EURUSD/5.19 + HG1!/FX:GBPUSD/4.50 + HG1!*FX:USDJPY/959.5 + HG1!/FX:AUDUSD/9.06',
   ZAR: '1/USDZAR/0.06109 + FX:EURUSD/USDZAR/0.07116 + FX:GBPUSD/USDZAR/0.08210 + FX:USDJPY/USDZAR/9.688 + FX:AUDUSD/USDZAR/0.04080',
   KRW: '1/USDKRW/0.000682 + FX:EURUSD/USDKRW/0.000794 + FX:GBPUSD/USDKRW/0.000916 + FX:USDJPY/USDKRW/0.10818 + FX:AUDUSD/USDKRW/0.000455',
@@ -226,11 +227,13 @@ function ViewModeToggle({ selected, onSelect }: { selected: ViewMode, onSelect: 
 
 function ThemeToggle() {
   const { theme, setTheme } = useTheme()
-  const [mounted, setMounted] = useState(false)
+  const isClient = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  )
 
-  useEffect(() => { setMounted(true) }, [])
-
-  if (!mounted) return null
+  if (!isClient) return null
 
   const options = [
     { key: 'light' as const, icon: '☀️' },

@@ -28,6 +28,7 @@ SYMBOLS_MAP = {
     'MYR': 'USDMYR=X',
     'XAU': 'GC=F',
     'XAG': 'SI=F',
+    'USO': 'CL=F',
     'XCU': 'HG=F',
     'ZAR': 'USDZAR=X',
     'KRW': 'USDKRW=X',
@@ -113,6 +114,7 @@ def calc_synthetic_indices(data):
     myr = get_c(SYMBOLS_MAP['MYR'])
     xau = get_c(SYMBOLS_MAP['XAU'])
     xag = get_c(SYMBOLS_MAP['XAG'])
+    uso = get_c(SYMBOLS_MAP['USO'])
     xcu = get_c(SYMBOLS_MAP['XCU'])
     zar = get_c(SYMBOLS_MAP['ZAR'])
     krw = get_c(SYMBOLS_MAP['KRW'])
@@ -156,6 +158,7 @@ def calc_synthetic_indices(data):
     indices['MYR'] = (1/myr)/0.22371 + (eur/myr)/0.23937 + (gbp/myr)/0.27740 + (jpy/myr)/31.99552 + (aud/myr)/0.14765
     indices['XAU'] = xau/4629 + (xau/eur)/3973 + (xau/gbp)/3444 + (xau*jpy)/734159 + (xau/aud)/6929
     indices['XAG'] = xag/85.23 + (xag/eur)/73.16 + (xag/gbp)/63.41 + (xag*jpy)/13517 + (xag/aud)/127.59
+    indices['USO'] = uso/93 + (uso/eur)/79.38 + (uso/gbp)/68.9 + (uso*jpy)/14832 + (uso/aud)/129.92
     indices['XCU'] = xcu/6.05 + (xcu/eur)/5.19 + (xcu/gbp)/4.50 + (xcu*jpy)/959.5 + (xcu/aud)/9.06
     indices['ZAR'] = (1/zar)/0.06109 + (eur/zar)/0.07116 + (gbp/zar)/0.08210 + (jpy/zar)/9.688 + (aud/zar)/0.04080
     indices['KRW'] = (1/krw)/0.000682 + (eur/krw)/0.000794 + (gbp/krw)/0.000916 + (jpy/krw)/0.10818 + (aud/krw)/0.000455
@@ -646,6 +649,7 @@ def main():
         myr = series_getter(SYMBOLS_MAP['MYR'])
         xau = series_getter(SYMBOLS_MAP['XAU'])
         xag = series_getter(SYMBOLS_MAP['XAG'])
+        uso = series_getter(SYMBOLS_MAP['USO'])
         xcu = series_getter(SYMBOLS_MAP['XCU'])
         zar = series_getter(SYMBOLS_MAP['ZAR'])
         krw = series_getter(SYMBOLS_MAP['KRW'])
@@ -689,6 +693,7 @@ def main():
         res['MYR'] = (1/myr)/0.22371 + (eur/myr)/0.23937 + (gbp/myr)/0.27740 + (jpy/myr)/31.99552 + (aud/myr)/0.14765
         res['XAU'] = xau/4629 + (xau/eur)/3973 + (xau/gbp)/3444 + (xau*jpy)/734159 + (xau/aud)/6929
         res['XAG'] = xag/85.23 + (xag/eur)/73.16 + (xag/gbp)/63.41 + (xag*jpy)/13517 + (xag/aud)/127.59
+        res['USO'] = uso/93 + (uso/eur)/79.38 + (uso/gbp)/68.9 + (uso*jpy)/14832 + (uso/aud)/129.92
         res['XCU'] = xcu/6.05 + (xcu/eur)/5.19 + (xcu/gbp)/4.50 + (xcu*jpy)/959.5 + (xcu/aud)/9.06
         res['ZAR'] = (1/zar)/0.06109 + (eur/zar)/0.07116 + (gbp/zar)/0.08210 + (jpy/zar)/9.688 + (aud/zar)/0.04080
         res['KRW'] = (1/krw)/0.000682 + (eur/krw)/0.000794 + (gbp/krw)/0.000916 + (jpy/krw)/0.10818 + (aud/krw)/0.000455
@@ -733,7 +738,7 @@ def main():
         # Dynamic minimum length check
         # Commodities and Emerging currencies might have shorter history in Yahoo
         min_len = 200
-        if symbol in ['XAU', 'XAG', 'XCU', 'ZAR', 'KRW', 'BRL',
+        if symbol in ['XAU', 'XAG', 'USO', 'XCU', 'ZAR', 'KRW', 'BRL',
                        'CN50', 'HK50', 'SG30', 'ASX200', 'CA60', 'NL25', 'FRA40', 'GER40',
                        'EUSTX50', 'IT40', 'SWI20', 'UK100', 'SPX500', 'NDQ100', 'US2000', 'US30', 'JPN225']:
             min_len = 50
