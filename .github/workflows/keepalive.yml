@@ -15,6 +15,15 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: gautamkrishnar/keepalive-workflow@v2
-        with:
-          time_elapsed: 50 # 仅当 50 天内没有 commit 时才触发保活
+      - name: Keep scheduled workflows alive
+        shell: bash
+        run: |
+          if git log --since="50 days ago" --format=%H -n 1 | grep -q .; then
+            echo "Recent commit exists; no keepalive needed."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: keep scheduled workflows alive"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
