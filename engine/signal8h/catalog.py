@@ -14,6 +14,7 @@ YAHOO_TICKERS = {
     'XAGUSD': 'SI=F',
     'USOUSD': 'CL=F',
     'XCUUSD': 'HG=F',
+    'WHEAT':  'ZW=F',
     # Stock indices
     'ASX200': '^AXJO',
     'CAN60':  '^GSPTSE',

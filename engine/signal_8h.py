@@ -27,11 +27,11 @@
 数据流 / Data Pipeline (6 Steps):
     ┌────────────────────────────────────────────────────────────────────────┐
     │ Step 1: Yahoo Finance 下载最新 60 天 1H 数据 (batch + individual fallback)│
-    │ Step 2: 增量归档到 Supabase ohlc_1h_archive 表 (1年保留, >1年自动清理)   │
-    │ Step 3: 从归档表加载完整 1 年 1H 历史 (分页读取, 突破60天限制)            │
+    │ Step 2: 增量归档到 Supabase ohlc_1h_archive 表 (默认730天保留)           │
+    │ Step 3: 从归档表加载完整归档历史 (分页读取, 突破60天限制)                │
     │ Step 4: 归档数据 + Yahoo 数据合并 → 合成 8H K线 → 计算信号               │
     │ Step 5: 信号结果推送到 Supabase signal_8h 表 (静态 API)                  │
-    │ Step 6: 清理超过 1 年的归档数据                                          │
+    │ Step 6: 清理超过保留期的归档数据                                         │
     └────────────────────────────────────────────────────────────────────────┘
 
 运行方式 / Execution:
@@ -60,6 +60,7 @@ from supabase import create_client
 
 from signal8h.catalog import get_all_signal_symbols, get_all_yahoo_tickers
 from signal8h.ohlc import (
+    ARCHIVE_RETENTION_DAYS,
     SOURCE_STALE_AFTER_HOURS,
     archive_to_supabase,
     cleanup_old_archive,
@@ -580,10 +581,12 @@ def main():
         archived_rows = archive_to_supabase(yahoo_data, sb)
         print(f"  → Archived {archived_rows} rows")
     
-    # 5. Load full archive (up to 1 year of accumulated data)
+    # 5. Load full archive. Stock indices only form about one valid 8H candle
+    # per trading day, so a one-year archive is not enough for the 369-SMA RSI
+    # first-wave module. The default retained depth is therefore 730 days.
     archive_data = {}
     if sb:
-        print(f"\nStep 3: Loading 1H archive from Supabase (up to 1 year)...")
+        print(f"\nStep 3: Loading 1H archive from Supabase (up to {ARCHIVE_RETENTION_DAYS} days)...")
         archive_data = load_from_archive(all_tickers, sb)
         print(f"  → Archive data: {len(archive_data)} tickers")
         if archive_data:
@@ -715,8 +718,8 @@ def main():
             print(f"  ❌ Supabase push failed: {e}")
             traceback.print_exc()
         
-        # 10. Cleanup — delete archive data older than 1 year
-        print("\nStep 6: Cleaning up old archive data (>1 year)...")
+        # 10. Cleanup — keep enough depth for slow-session symbols such as indices.
+        print(f"\nStep 6: Cleaning up old archive data (>{ARCHIVE_RETENTION_DAYS} days)...")
         deleted = cleanup_old_archive(sb)
         print(f"  → Deleted {deleted} old rows")
         

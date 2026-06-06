@@ -5,6 +5,7 @@ export const SIGNAL_8H_EXPECTED_SYMBOLS = [
   'XAGUSD',
   'USOUSD',
   'XCUUSD',
+  'WHEAT',
   'ASX200',
   'CAN60',
   'CN50',

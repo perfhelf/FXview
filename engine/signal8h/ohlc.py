@@ -1,6 +1,7 @@
 """Download, archive, and assemble 1H/8H OHLC data for the signal engine."""
 
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from urllib.parse import quote
@@ -11,8 +12,10 @@ import pandas as pd
 from signal8h.catalog import SYNTHETIC_PAIRS, YAHOO_TICKERS
 
 ARCHIVE_PAGE_SIZE = 1000
+ARCHIVE_RETENTION_DAYS = int(os.environ.get("SIGNAL_8H_ARCHIVE_RETENTION_DAYS", "730"))
 YAHOO_CHART_TIMEOUT_SECONDS = 20
 YAHOO_DOWNLOAD_WORKERS = 8
+YAHOO_RANGE_FALLBACKS = ["2y", "500d", "300d", "60d"]
 YAHOO_CHART_BASE_URL = "https://query1.finance.yahoo.com/v8/finance/chart"
 YAHOO_USER_AGENT = "Mozilla/5.0 (compatible; FXviewSignal8H/1.0)"
 SOURCE_STALE_AFTER_HOURS = 24
@@ -41,15 +44,15 @@ def synthesize_8h_candles(df_1h):
     return ohlc
 
 
-def _build_chart_url(ticker):
+def _build_chart_url(ticker, range_period="60d"):
     encoded_ticker = quote(ticker, safe="")
     return (
         f"{YAHOO_CHART_BASE_URL}/{encoded_ticker}"
-        "?range=60d&interval=1h&includePrePost=false&events=history"
+        f"?range={quote(range_period, safe='')}&interval=1h&includePrePost=false&events=history"
     )
 
 
-def _download_chart_ticker(ticker):
+def _download_chart_ticker_once(ticker, range_period):
     """
     Download one ticker through Yahoo's chart API.
 
@@ -57,7 +60,7 @@ def _download_chart_ticker(ticker):
     when the raw chart API returns valid JSON. This direct client keeps the data
     supplier small, observable, and easy to replace later.
     """
-    request = Request(_build_chart_url(ticker), headers={"User-Agent": YAHOO_USER_AGENT})
+    request = Request(_build_chart_url(ticker, range_period), headers={"User-Agent": YAHOO_USER_AGENT})
     with urlopen(request, timeout=YAHOO_CHART_TIMEOUT_SECONDS) as response:
         payload = json.load(response)
 
@@ -84,7 +87,31 @@ def _download_chart_ticker(ticker):
     return df.dropna()
 
 
-def download_1h_data(tickers):
+def _download_chart_ticker(ticker, range_period="60d"):
+    """
+    Download one ticker, with range fallbacks for Yahoo's uneven retention rules.
+
+    Some exchange tickers reject `730d` 1H even though equivalent depth is
+    available through `2y` or `500d`. The supplier tries the requested range
+    first, then smaller/stable fallbacks so one symbol does not disappear.
+    """
+    ranges = [range_period]
+    ranges.extend(period for period in YAHOO_RANGE_FALLBACKS if period not in ranges)
+
+    errors = []
+    for period in ranges:
+        try:
+            df = _download_chart_ticker_once(ticker, period)
+            if not df.empty and period != range_period:
+                print(f"    FALLBACK {ticker}: {range_period} -> {period}")
+            return df
+        except Exception as error:
+            errors.append(f"{period}:{error}")
+
+    raise ValueError("; ".join(errors))
+
+
+def download_1h_data(tickers, range_period="60d"):
     """
     Download fresh 1H data.
 
@@ -96,10 +123,10 @@ def download_1h_data(tickers):
     failures = {}
     workers = min(YAHOO_DOWNLOAD_WORKERS, max(1, len(tickers)))
 
-    print(f"  Downloading via Yahoo chart API ({workers} workers)...")
+    print(f"  Downloading via Yahoo chart API ({workers} workers, range={range_period})...")
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
-            executor.submit(_download_chart_ticker, ticker): ticker
+            executor.submit(_download_chart_ticker, ticker, range_period): ticker
             for ticker in tickers
         }
 
@@ -157,9 +184,9 @@ def archive_to_supabase(ticker_data, sb):
     return total_rows
 
 
-def load_from_archive(tickers, sb):
-    """Load up to one year of 1H data from Supabase with pagination."""
-    cutoff = (datetime.utcnow() - timedelta(days=365)).strftime('%Y-%m-%dT%H:%M:%SZ')
+def load_from_archive(tickers, sb, retention_days=ARCHIVE_RETENTION_DAYS):
+    """Load retained 1H data from Supabase with pagination."""
+    cutoff = (datetime.utcnow() - timedelta(days=retention_days)).strftime('%Y-%m-%dT%H:%M:%SZ')
     archive_data = {}
 
     for ticker in tickers:
@@ -197,9 +224,9 @@ def load_from_archive(tickers, sb):
     return archive_data
 
 
-def cleanup_old_archive(sb):
-    """Delete archive rows older than one year."""
-    cutoff = (datetime.utcnow() - timedelta(days=365)).strftime('%Y-%m-%dT%H:%M:%SZ')
+def cleanup_old_archive(sb, retention_days=ARCHIVE_RETENTION_DAYS):
+    """Delete archive rows older than the configured retained depth."""
+    cutoff = (datetime.utcnow() - timedelta(days=retention_days)).strftime('%Y-%m-%dT%H:%M:%SZ')
     try:
         result = sb.table('ohlc_1h_archive').delete().lt('ts', cutoff).execute()
         return len(result.data) if result.data else 0
