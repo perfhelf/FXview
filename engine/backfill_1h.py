@@ -1,176 +1,207 @@
 """
-FXview — 1H OHLC Backfill Script (One-Time)
+FXview — 1H OHLC archive backfill.
 
-Downloads up to 10 months of 1H data from Yahoo Finance and
-upserts it into the ohlc_1h_archive table in Supabase.
+This is the historical-data warehouse clerk for the 8H signal engine. The
+daily engine only needs a fresh 60-day overlap, but stock indices create only
+about one valid 8H candle per trading day. A one-year archive is therefore too
+shallow for the first-wave RSI 369-SMA module.
 
-This is meant to be run ONCE to bootstrap historical data,
-so the signal engine immediately has enough depth for
-RSI 369-SMA calculations.
-
-Usage:
-    python engine/backfill_1h.py
+Environment:
+    SUPABASE_URL
+    SUPABASE_SERVICE_ROLE_KEY or SUPABASE_KEY
+    SIGNAL_8H_BACKFILL_RANGE=730d
+    SIGNAL_8H_ARCHIVE_RETENTION_DAYS=730
+    SIGNAL_8H_BACKFILL_SYMBOLS=JPN225,US30,WHEAT  (optional)
+    SIGNAL_8H_MIN_8H_CANDLES=370
 """
 
 import os
 import sys
-import time
-import yfinance as yf
+from datetime import datetime
+
 import pandas as pd
-from datetime import datetime, timedelta
 from supabase import create_client
 
-# ==========================================
-# Config
-# ==========================================
-
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
-
-# Import ticker mappings from signal engine
 sys.path.insert(0, os.path.dirname(__file__))
-from signal_8h import get_all_yahoo_tickers
 
-# ==========================================
-# Backfill Logic
-# ==========================================
+from signal8h.catalog import (  # noqa: E402
+    SYNTHETIC_PAIRS,
+    YAHOO_TICKERS,
+    get_all_signal_symbols,
+    get_all_yahoo_tickers,
+)
+from signal8h.ohlc import (  # noqa: E402
+    ARCHIVE_RETENTION_DAYS,
+    SOURCE_STALE_AFTER_HOURS,
+    archive_to_supabase,
+    cleanup_old_archive,
+    download_1h_data,
+    load_from_archive,
+    resolve_symbol_1h,
+    synthesize_8h_candles,
+)
 
-def download_1h_history(ticker, period="300d"):
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_KEY")
+BACKFILL_RANGE = os.environ.get("SIGNAL_8H_BACKFILL_RANGE", f"{ARCHIVE_RETENTION_DAYS}d")
+MIN_8H_CANDLES = int(os.environ.get("SIGNAL_8H_MIN_8H_CANDLES", "370"))
+
+
+def parse_requested_symbols():
+    """Return the provider symbols that should be audited after this run."""
+    all_symbols = get_all_signal_symbols()
+    raw = os.environ.get("SIGNAL_8H_BACKFILL_SYMBOLS", "").strip()
+    if not raw:
+        return all_symbols
+
+    requested = [symbol.strip().upper() for symbol in raw.split(",") if symbol.strip()]
+    unknown = [symbol for symbol in requested if symbol not in all_symbols]
+    if unknown:
+        print(f"ERROR: Unknown SIGNAL_8H_BACKFILL_SYMBOLS: {', '.join(unknown)}")
+        raise SystemExit(1)
+
+    return requested
+
+
+def tickers_for_symbols(symbols):
+    """Translate provider symbols into the Yahoo tickers they need."""
+    if set(symbols) == set(get_all_signal_symbols()):
+        return get_all_yahoo_tickers()
+
+    tickers = set()
+    for symbol in symbols:
+        direct_ticker = YAHOO_TICKERS.get(symbol)
+        if direct_ticker:
+            tickers.add(direct_ticker)
+            continue
+
+        synthetic = SYNTHETIC_PAIRS.get(symbol)
+        if synthetic:
+            num_ticker, den_ticker, _ = synthetic
+            tickers.add(num_ticker)
+            tickers.add(den_ticker)
+
+    return sorted(tickers)
+
+
+def timestamp_label(index_value):
+    if index_value is None:
+        return None
+    return pd.Timestamp(index_value).strftime("%Y-%m-%d %H:%M:%SZ")
+
+
+def audit_symbol_depth(symbols, ticker_data, fresh_ticker_data):
     """
-    Download 1H data for a single ticker.
-    Uses individual download (not batch) for reliability with long periods.
+    Verify business depth after the archive write.
+
+    Row counts alone are misleading: FX pairs trade nearly 24h, while indices
+    have short exchange sessions. The reliable check is the final synthesized
+    8H candle count for each provider symbol.
     """
-    try:
-        df = yf.download(
-            ticker,
-            period=period,
-            interval="1h",
-            progress=False,
+    report = []
+    shallow = []
+    missing = []
+
+    for symbol in symbols:
+        df_1h, metadata, source_error = resolve_symbol_1h(
+            symbol,
+            ticker_data,
+            fresh_ticker_data,
+            expected_close=None,
+            stale_after_hours=SOURCE_STALE_AFTER_HOURS,
         )
-        if df.empty:
-            return pd.DataFrame()
-        
-        # Handle MultiIndex columns from single-ticker download
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        
-        df = df[['Open', 'High', 'Low', 'Close']].dropna()
-        return df
-    except Exception as e:
-        print(f"    ⚠️ Download failed: {e}")
-        return pd.DataFrame()
+
+        if source_error or df_1h.empty:
+            item = {
+                "symbol": symbol,
+                "status": "missing",
+                "error": source_error or "no_1h_data",
+                "source": metadata,
+            }
+            report.append(item)
+            missing.append(item)
+            continue
+
+        df_8h = synthesize_8h_candles(df_1h)
+        item = {
+            "symbol": symbol,
+            "status": "ok" if len(df_8h) >= MIN_8H_CANDLES else "shallow",
+            "candles_8h": len(df_8h),
+            "rows_1h": len(df_1h),
+            "first_1h": timestamp_label(df_1h.index[0]) if not df_1h.empty else None,
+            "latest_1h": timestamp_label(df_1h.index[-1]) if not df_1h.empty else None,
+            "source": metadata,
+        }
+        report.append(item)
+        if item["status"] == "shallow":
+            shallow.append(item)
+
+    return report, missing, shallow
 
 
-def upsert_to_archive(sb, ticker, df):
-    """Upsert DataFrame rows to ohlc_1h_archive table."""
-    if df.empty:
-        return 0
-    
-    rows = []
-    for ts, row in df.iterrows():
-        if hasattr(ts, 'tz') and ts.tz is not None:
-            ts_str = ts.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ')
-        else:
-            ts_str = ts.strftime('%Y-%m-%dT%H:%M:%SZ')
-        
-        rows.append({
-            'ticker': ticker,
-            'ts': ts_str,
-            'open': float(row['Open']),
-            'high': float(row['High']),
-            'low': float(row['Low']),
-            'close': float(row['Close']),
-        })
-    
-    total = 0
-    for i in range(0, len(rows), 500):
-        chunk = rows[i:i+500]
-        try:
-            sb.table('ohlc_1h_archive').upsert(chunk, on_conflict='ticker,ts').execute()
-            total += len(chunk)
-        except Exception as e:
-            print(f"    ⚠️ Upsert failed (chunk {i}): {e}")
-    
-    return total
+def print_depth_report(report):
+    print("\nSymbol depth audit:")
+    for item in report:
+        if item["status"] == "missing":
+            print(f"  - {item['symbol']}: missing ({item['error']})")
+            continue
+
+        marker = "OK" if item["status"] == "ok" else "SHALLOW"
+        print(
+            f"  - {item['symbol']}: {marker}, "
+            f"8H={item['candles_8h']}, 1H={item['rows_1h']}, "
+            f"{item['first_1h']} -> {item['latest_1h']}"
+        )
 
 
 def main():
-    print("=" * 60)
-    print("FXview — 1H OHLC Backfill (One-Time)")
+    print("=" * 72)
+    print("FXview — 1H OHLC Archive Backfill")
     print(f"Run Time: {datetime.utcnow().isoformat()}Z")
-    print(f"Target: 300 days (~10 months) of 1H data")
-    print("=" * 60)
-    
+    print(f"Yahoo range: {BACKFILL_RANGE}")
+    print(f"Archive retention: {ARCHIVE_RETENTION_DAYS} days")
+    print(f"Minimum 8H depth: {MIN_8H_CANDLES} candles")
+    print("=" * 72)
+
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("ERROR: Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY")
-        sys.exit(1)
-    
+        print("ERROR: Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY/SUPABASE_KEY")
+        raise SystemExit(1)
+
+    symbols = parse_requested_symbols()
+    tickers = tickers_for_symbols(symbols)
+    print(f"\nBackfilling {len(tickers)} Yahoo tickers for {len(symbols)} provider symbols.")
+
     sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-    tickers = get_all_yahoo_tickers()
-    
-    print(f"\nBackfilling {len(tickers)} tickers...\n")
-    
-    total_rows = 0
-    success_count = 0
-    fail_count = 0
-    
-    for i, ticker in enumerate(tickers):
-        print(f"  [{i+1}/{len(tickers)}] {ticker}...", end=" ", flush=True)
-        
-        # Download with retry
-        df = pd.DataFrame()
-        for attempt in range(3):
-            df = download_1h_history(ticker, period="300d")
-            if not df.empty:
-                break
-            if attempt < 2:
-                print(f"retry {attempt+2}...", end=" ", flush=True)
-                time.sleep(2)
-        
-        if df.empty:
-            print("❌ no data")
-            fail_count += 1
-            continue
-        
-        # Upsert to archive
-        rows = upsert_to_archive(sb, ticker, df)
-        total_rows += rows
-        success_count += 1
-        
-        # Show date range
-        earliest = df.index[0]
-        latest = df.index[-1]
-        print(f"✅ {rows} rows ({earliest.strftime('%Y-%m-%d')} → {latest.strftime('%Y-%m-%d')})")
-        
-        # Rate limit: small delay between tickers
-        time.sleep(0.5)
-    
-    print(f"\n{'=' * 60}")
-    print(f"Backfill complete: {success_count} success, {fail_count} failed")
-    print(f"Total rows archived: {total_rows}")
-    print(f"{'=' * 60}")
-    
-    # Verify archive depth
-    print("\nVerifying archive depth...")
-    result = sb.table('ohlc_1h_archive') \
-        .select('ticker') \
-        .execute()
-    
-    if result.data:
-        total = len(result.data)
-        # Get a sample
-        sample = sb.table('ohlc_1h_archive') \
-            .select('ts') \
-            .eq('ticker', 'EURUSD=X') \
-            .order('ts') \
-            .limit(1) \
-            .execute()
-        if sample.data:
-            earliest = sample.data[0]['ts']
-            print(f"  Archive total: {total} rows")
-            print(f"  EURUSD earliest: {earliest}")
-    
-    print("\nDone. ✅")
+
+    fresh_data = download_1h_data(tickers, range_period=BACKFILL_RANGE)
+    if not fresh_data:
+        print("ERROR: Yahoo returned no 1H data; archive was not changed.")
+        raise SystemExit(1)
+
+    print("\nWriting archive rows to Supabase...")
+    archived_rows = archive_to_supabase(fresh_data, sb)
+    print(f"  -> Upserted {archived_rows} rows")
+
+    print("\nCleaning archive to the same retention window used by the daily engine...")
+    deleted_rows = cleanup_old_archive(sb, retention_days=ARCHIVE_RETENTION_DAYS)
+    print(f"  -> Deleted {deleted_rows} rows outside the retained window")
+
+    print("\nReloading retained archive for verification...")
+    archive_data = load_from_archive(tickers, sb, retention_days=ARCHIVE_RETENTION_DAYS)
+    # Audit the same data shape the daily engine will consume after cleanup:
+    # retained archive depth plus symbol-level source freshness metadata.
+    report, missing, shallow = audit_symbol_depth(symbols, archive_data, fresh_data)
+    print_depth_report(report)
+
+    if missing or shallow:
+        print("\nBackfill finished with unresolved depth gaps.")
+        if missing:
+            print(f"  Missing symbols: {', '.join(item['symbol'] for item in missing)}")
+        if shallow:
+            print(f"  Shallow symbols: {', '.join(item['symbol'] for item in shallow)}")
+        raise SystemExit(1)
+
+    print("\nBackfill complete. All audited symbols have enough 8H depth. OK")
 
 
 if __name__ == "__main__":

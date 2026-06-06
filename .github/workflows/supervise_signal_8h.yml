@@ -1,14 +1,14 @@
-name: Manual 8H Signal Emergency Run
+name: Supervise 8H Signals
 
 on:
-  # Emergency-only: official polling must be triggered by cron-job.org or a
-  # dedicated worker, so GitHub Actions cannot overwrite provider state.
+  # Emergency-only: daily freshness supervision is handled by
+  # /api/cron/signal-8h-supervisor via cron-job.org.
   workflow_dispatch:
 
 jobs:
-  update_signals:
+  supervise_signals:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
 
     steps:
       - name: Checkout Repository
@@ -23,9 +23,10 @@ jobs:
         run: |
           pip install -r engine/requirements.txt
 
-      - name: Run 8H Signal Engine
+      - name: Audit 8H Signal Freshness
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SIGNAL_8H_STALE_AFTER_HOURS: '24'
         run: |
-          python engine/signal_8h.py
+          python engine/signal8h/supervisor.py

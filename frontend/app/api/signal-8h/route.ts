@@ -1,5 +1,13 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { NextResponse } from 'next/server'
+import { createSignal8HClient } from '@/lib/signal-8h/client'
+import { SIGNAL_8H_EXPECTED_SYMBOLS } from '@/lib/signal-8h/catalog'
+import {
+  SIGNAL_8H_CACHE_CONTROL,
+  getSignal8HDatabaseConfig,
+} from '@/lib/signal-8h/config'
+import { toSignal8HResponse } from '@/lib/signal-8h/presenter'
+import { parseSignal8HQuery } from '@/lib/signal-8h/request'
+import { fetchSignal8HRows } from '@/lib/signal-8h/repository'
 
 /**
  * GET /api/signal-8h
@@ -17,82 +25,44 @@ import { createClient } from '@supabase/supabase-js';
  *     ...
  *   ],
  *   "count": 53,
- *   "updated_at": "2026-03-24T12:00:00Z"
+ *   "updated_at": "2026-03-24T12:00:00Z",
+ *   "health": { "missing_symbols": [], "stale_symbols": [] }
  * }
  * 
  * No authentication required (public read-only data).
  */
 export async function GET(request: Request) {
   try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+    const config = getSignal8HDatabaseConfig()
 
-    if (!supabaseUrl || !supabaseKey) {
+    if (!config) {
       return NextResponse.json(
         { error: 'Database configuration missing' },
         { status: 500 }
-      );
+      )
     }
 
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // Parse query params
-    const { searchParams } = new URL(request.url);
-    const symbolFilter = searchParams.get('symbol');
-
-    // Build query
-    let query = supabase.from('signal_8h').select('symbol, data, updated_at');
-
-    if (symbolFilter) {
-      query = query.eq('symbol', symbolFilter.toUpperCase());
-    }
-
-    const { data: rows, error } = await query;
-
-    if (error) {
-      console.error('Supabase query error:', error);
-      return NextResponse.json(
-        { error: 'Database query failed' },
-        { status: 500 }
-      );
-    }
-
-    if (!rows || rows.length === 0) {
-      return NextResponse.json(
-        { signals: [], count: 0, updated_at: null },
-        { status: 200 }
-      );
-    }
-
-    // Extract signal data from JSONB
-    const signals = rows.map((row: { symbol: string; data: Record<string, unknown>; updated_at: string }) => ({
-      symbol: row.symbol,
-      ...row.data,
-    }));
-
-    // Get most recent update time
-    const latestUpdate = rows.reduce((latest: string, row: { updated_at: string }) => {
-      return row.updated_at > latest ? row.updated_at : latest;
-    }, rows[0].updated_at);
+    const supabase = createSignal8HClient(config)
+    const query = parseSignal8HQuery(request)
+    const rows = await fetchSignal8HRows(supabase, query)
+    const expectedSymbols = query.symbol
+      ? [query.symbol]
+      : SIGNAL_8H_EXPECTED_SYMBOLS
 
     return NextResponse.json(
-      {
-        signals,
-        count: signals.length,
-        updated_at: latestUpdate,
-      },
+      toSignal8HResponse(rows, expectedSymbols),
       {
         status: 200,
         headers: {
-          'Cache-Control': 'public, s-maxage=1800, stale-while-revalidate=3600',
+          'Cache-Control': SIGNAL_8H_CACHE_CONTROL,
         },
       }
-    );
+    )
   } catch (err) {
-    console.error('Signal API error:', err);
+    console.error('Signal API error:', err)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
-    );
+    )
   }
 }

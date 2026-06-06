@@ -3,9 +3,9 @@
 =============================================
 
 核心功能 / Core Purpose:
-    为 53 个 EIGHTCAP 交易品种计算 8H 级别的趋势和一浪信号。
+    为 FXview 供货清单中的交易品种计算 8H 级别的趋势和一浪信号。
     Computes trend-following and first-wave signals on the 8H timeframe
-    for 53 EIGHTCAP trading instruments.
+    for the FXview provider manifest.
 
 信号输出 / Signal Output:
     每个品种输出 2 个信号，各有 3 种状态：
@@ -27,20 +27,19 @@
 数据流 / Data Pipeline (6 Steps):
     ┌────────────────────────────────────────────────────────────────────────┐
     │ Step 1: Yahoo Finance 下载最新 60 天 1H 数据 (batch + individual fallback)│
-    │ Step 2: 增量归档到 Supabase ohlc_1h_archive 表 (1年保留, >1年自动清理)   │
-    │ Step 3: 从归档表加载完整 1 年 1H 历史 (分页读取, 突破60天限制)            │
+    │ Step 2: 增量归档到 Supabase ohlc_1h_archive 表 (默认730天保留)           │
+    │ Step 3: 从归档表加载完整归档历史 (分页读取, 突破60天限制)                │
     │ Step 4: 归档数据 + Yahoo 数据合并 → 合成 8H K线 → 计算信号               │
     │ Step 5: 信号结果推送到 Supabase signal_8h 表 (静态 API)                  │
-    │ Step 6: 清理超过 1 年的归档数据                                          │
+    │ Step 6: 清理超过保留期的归档数据                                         │
     └────────────────────────────────────────────────────────────────────────┘
 
 运行方式 / Execution:
-    GitHub Actions cron 每日 3 次 (对齐 8H K线收盘):
-      UTC 00:30 (北京 08:30) — 对应 16:00-00:00 K线收盘
-      UTC 08:30 (北京 16:30) — 对应 00:00-08:00 K线收盘
-      UTC 16:30 (北京 00:30) — 对应 08:00-16:00 K线收盘
-    含 Freshness Gate: 只有确认 8H K线已收盘才计算和推送。
-    手动触发 (workflow_dispatch) 绕过 Freshness Gate。
+    正式轮询必须由 cron-job.org 或独立 worker 唤醒 HTTP/worker 入口；
+    GitHub Actions 只保留 emergency workflow_dispatch，不再承担定时写库。
+    Scheduled runs keep a freshness gate so old bars cannot be republished as
+    fresh data. Manual emergency runs bypass only the market-wide gate; each
+    symbol still publishes explicit source status.
 
 消费者 / Consumers:
     - Next.js API Route: GET /api/signal-8h → 前端 / Swift 客户端读取
@@ -52,526 +51,36 @@ Supabase 表结构 / Tables:
 """
 
 import os
-import sys
 import json
 import traceback
-import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-from supabase import create_client, Client
+from datetime import datetime
+from supabase import create_client
+
+from signal8h.catalog import get_all_signal_symbols, get_all_yahoo_tickers
+from signal8h.ohlc import (
+    ARCHIVE_RETENTION_DAYS,
+    SOURCE_STALE_AFTER_HOURS,
+    archive_to_supabase,
+    cleanup_old_archive,
+    download_1h_data,
+    load_from_archive,
+    merge_ticker_data,
+    resolve_symbol_1h,
+    synthesize_8h_candles,
+)
+from signal8h.sink import make_unavailable_payload, push_signal_results, utc_now_iso
+from signal8h.time_gate import check_data_freshness, get_expected_8h_close
 
 # ==========================================
 # Configuration
 # ==========================================
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_KEY")
-
-# ==========================================
-# EIGHTCAP → Yahoo Finance Ticker Mapping
-# ==========================================
-# 品种映射表: EIGHTCAP 交易品种名称 → Yahoo Finance 代码
-# Key = EIGHTCAP display symbol (e.g., "XAUUSD", "EURAUD")
-# Value = Yahoo ticker string (e.g., "GC=F", "EURAUD=X")
-#
-# 共 49 个直接品种 + 6 个合成品种 = 55 个信号
-# Total: 49 direct + 6 synthetic = 55 signals
-
-# --- Direct Yahoo Tickers ---
-YAHOO_TICKERS = {
-    # === 黄金板块 (direct) ===
-    'XAUUSD': 'GC=F',
-    'XAGUSD': 'SI=F',
-    'USOUSD': 'CL=F',      # WTI Crude Oil Futures
-    'XCUUSD': 'HG=F',      # Copper Futures
-    # === 主力期货 (Stock Indices) ===
-    'ASX200': '^AXJO',
-    'CAN60':  '^GSPTSE',
-    'CN50':   '2823.HK',   # iShares FTSE China A50 ETF
-    'FRA40':  '^FCHI',
-    'EUSTX50': '^STOXX50E',
-    'HK50':   '^HSI',
-    'GER40':  '^GDAXI',
-    'JPN225': '^N225',
-    'NDQ100': '^NDX',
-    'NTH25':  '^AEX',      # Netherlands 25 (NL25)
-    'ITA40':  'FTSEMIB.MI',
-    'SWI20':  '^SSMI',
-    'SPX500': '^GSPC',
-    'UK100':  '^FTSE',
-    'US2000': '^RUT',
-    'US30':   '^DJI',
-    # === 澳纽监视板块 ===
-    'AUDNZD': 'AUDNZD=X',
-    'AUDCAD': 'AUDCAD=X',
-    'AUDUSD': 'AUDUSD=X',
-    'NZDCAD': 'NZDCAD=X',
-    'NZDUSD': 'NZDUSD=X',
-    # === 美元区 ===
-    'USDJPY': 'USDJPY=X',
-    'USDCAD': 'USDCAD=X',
-    'USDBRL': 'USDBRL=X',
-    # === 欧元区监视 ===
-    'EURAUD': 'EURAUD=X',
-    'EURCAD': 'EURCAD=X',
-    'EURGBP': 'EURGBP=X',
-    'EURNZD': 'EURNZD=X',
-    'EURUSD': 'EURUSD=X',
-    # === 英镑区监视 ===
-    'GBPAUD': 'GBPAUD=X',
-    'GBPCAD': 'GBPCAD=X',
-    'GBPNZD': 'GBPNZD=X',
-    'GBPUSD': 'GBPUSD=X',
-    # === 日元监视板块 ===
-    'AUDJPY': 'AUDJPY=X',
-    'CADJPY': 'CADJPY=X',
-    'CHFJPY': 'CHFJPY=X',
-    'EURJPY': 'EURJPY=X',
-    'GBPJPY': 'GBPJPY=X',
-    'NZDJPY': 'NZDJPY=X',
-    # === 瑞郎监视板块 ===
-    'AUDCHF': 'AUDCHF=X',
-    'CADCHF': 'CADCHF=X',
-    'EURCHF': 'EURCHF=X',
-    'GBPCHF': 'GBPCHF=X',
-    'NZDCHF': 'NZDCHF=X',
-    'USDCHF': 'USDCHF=X',
-}
-
-# --- 合成品种 Synthetic Pairs (Yahoo 不直接提供, 由基础品种计算) ---
-# 这些品种 Yahoo Finance 没有直接数据, 需要用两个基础品种的 OHLC 计算合成
-# These pairs aren't available on Yahoo; computed from two base tickers' OHLC.
-# Format: { symbol: (numerator_ticker, denominator_ticker, operation) }
-# operation: 'divide' = num/den (如 XAUAUD = 金价/澳元)
-#            'multiply' = num*den (如 XAUJPY = 金价×美日)
-SYNTHETIC_PAIRS = {
-    'XAUAUD': ('GC=F', 'AUDUSD=X', 'divide'),    # Gold/AUD = GC=F / AUDUSD
-    'XAUEUR': ('GC=F', 'EURUSD=X', 'divide'),     # Gold/EUR = GC=F / EURUSD
-    'XAUGBP': ('GC=F', 'GBPUSD=X', 'divide'),     # Gold/GBP = GC=F / GBPUSD
-    'XAUJPY': ('GC=F', 'USDJPY=X', 'multiply'),   # Gold/JPY = GC=F × USDJPY
-    'XAGEUR': ('SI=F', 'EURUSD=X', 'divide'),      # Silver/EUR = SI=F / EURUSD
-    'XAGJPY': ('SI=F', 'USDJPY=X', 'multiply'),    # Silver/JPY = SI=F × USDJPY
-}
-
-# Collect all unique Yahoo tickers needed for download
-def get_all_yahoo_tickers():
-    """Get unique set of Yahoo tickers to download."""
-    tickers = set(YAHOO_TICKERS.values())
-    for _, (num_t, den_t, _) in SYNTHETIC_PAIRS.items():
-        tickers.add(num_t)
-        tickers.add(den_t)
-    return sorted(list(tickers))
-
-# ==========================================
-# 8H Freshness Gate — "Get then Push"
-# ==========================================
-
-def get_expected_8h_close():
-    """
-    Determine the most recent 8H candle close time.
-    
-    8H candle windows (UTC):
-      00:00-08:00 → closes at 08:00
-      08:00-16:00 → closes at 16:00
-      16:00-00:00 → closes at 00:00 (next day)
-    
-    Returns:
-        (expected_close_utc, bucket_start_utc)
-    """
-    now = datetime.utcnow()
-    hour = now.hour
-    
-    # Determine which 8H candle just closed
-    if hour < 8:
-        # The 16:00-00:00 candle closed at today's 00:00
-        close_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        bucket_start = close_time - timedelta(hours=8)
-    elif hour < 16:
-        # The 00:00-08:00 candle closed at today's 08:00
-        close_time = now.replace(hour=8, minute=0, second=0, microsecond=0)
-        bucket_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    else:
-        # The 08:00-16:00 candle closed at today's 16:00
-        close_time = now.replace(hour=16, minute=0, second=0, microsecond=0)
-        bucket_start = now.replace(hour=8, minute=0, second=0, microsecond=0)
-    
-    return close_time, bucket_start
-
-
-def check_data_freshness(ticker_data, expected_close):
-    """
-    Verify that downloaded data contains candles up to the expected 8H close.
-    
-    Uses FX reference tickers (EURUSD, GBPUSD) since they trade nearly 24h.
-    Returns True if data is fresh enough (has 1H bars within the latest 8H window).
-    """
-    reference_tickers = ['EURUSD=X', 'GBPUSD=X', 'GC=F']  # FX + Gold as fallback
-    
-    for ref_ticker in reference_tickers:
-        if ref_ticker not in ticker_data:
-            continue
-        
-        df = ticker_data[ref_ticker]
-        if df.empty:
-            continue
-        
-        # Get the latest timestamp from the data
-        latest_ts = df.index[-1]
-        if hasattr(latest_ts, 'tz') and latest_ts.tz is not None:
-            latest_ts = latest_ts.tz_convert('UTC').tz_localize(None)
-        
-        # Calculate how stale the data is relative to expected close
-        staleness = expected_close - latest_ts
-        hours_stale = staleness.total_seconds() / 3600
-        
-        print(f"  → Freshness check [{ref_ticker}]: latest={latest_ts}, expected_close={expected_close}, staleness={hours_stale:.1f}h")
-        
-        # Data is fresh if the latest bar is within 4 hours of the expected close
-        # (meaning we have at least half the 8H window filled)
-        if hours_stale <= 4:
-            return True
-    
-    return False
-
-
-# ==========================================
-# 1H → 8H Candle Synthesis
-# ==========================================
-
-def synthesize_8h_candles(df_1h):
-    """
-    Synthesize 8H candles from 1H OHLC data.
-    
-    Alignment: UTC 00-08, 08-16, 16-24
-    
-    Args:
-        df_1h: DataFrame with DatetimeIndex (UTC) and columns: Open, High, Low, Close, Volume
-    
-    Returns:
-        DataFrame with 8H OHLC candles
-    """
-    if df_1h is None or df_1h.empty:
-        return pd.DataFrame()
-    
-    # Ensure UTC timezone
-    if df_1h.index.tz is not None:
-        df_1h = df_1h.tz_convert('UTC')
-    
-    # Assign 8H bucket: floor to nearest 8-hour boundary
-    df_1h = df_1h.copy()
-    df_1h['bucket'] = df_1h.index.floor('8h')
-    
-    # Aggregate OHLC
-    ohlc = df_1h.groupby('bucket').agg({
-        'Open': 'first',
-        'High': 'max',
-        'Low': 'min',
-        'Close': 'last',
-    }).dropna()
-    
-    # Only keep complete 8H candles (need at least 6 of 8 hours to be meaningful)
-    counts = df_1h.groupby('bucket').size()
-    ohlc = ohlc[counts >= 4]  # relaxed: weekends/holidays may have gaps
-    
-    ohlc.index.name = 'Date'
-    return ohlc
-
-
-def get_1h_ohlc(ticker, raw_data):
-    """
-    Extract 1H OHLC for a single ticker from the batch download.
-    
-    Handles all yfinance column formats:
-      - MultiIndex (Price, Ticker): raw_data['Open']['GC=F']
-      - MultiIndex (Ticker, Price): raw_data['GC=F']['Open']
-      - Flat columns (single ticker): raw_data['Open']
-    
-    Args:
-        ticker: Yahoo ticker string
-        raw_data: DataFrame from yf.download()
-    
-    Returns:
-        DataFrame with Open, High, Low, Close columns
-    """
-    try:
-        if isinstance(raw_data.columns, pd.MultiIndex):
-            level_0_values = raw_data.columns.get_level_values(0).unique().tolist()
-            ohlc_names = {'Open', 'High', 'Low', 'Close', 'Volume', 'Adj Close'}
-            
-            if set(level_0_values) & ohlc_names:
-                # Format: (Price, Ticker) — e.g., ('Open', 'GC=F')
-                df = pd.DataFrame({
-                    'Open': raw_data['Open'][ticker],
-                    'High': raw_data['High'][ticker],
-                    'Low': raw_data['Low'][ticker],
-                    'Close': raw_data['Close'][ticker],
-                })
-            else:
-                # Format: (Ticker, Price) — e.g., ('GC=F', 'Open')
-                df = pd.DataFrame({
-                    'Open': raw_data[ticker]['Open'],
-                    'High': raw_data[ticker]['High'],
-                    'Low': raw_data[ticker]['Low'],
-                    'Close': raw_data[ticker]['Close'],
-                })
-        else:
-            # Flat columns (single ticker download)
-            df = raw_data[['Open', 'High', 'Low', 'Close']].copy()
-        return df.dropna()
-    except (KeyError, TypeError) as e:
-        return pd.DataFrame()
-
-
-def download_1h_data(tickers):
-    """
-    Download 1H data for all tickers. Uses batch download first,
-    falls back to individual downloads if batch fails.
-    
-    Returns:
-        Dict mapping ticker → DataFrame with OHLC columns
-    """
-    ticker_data = {}
-    
-    # Try batch download first
-    print("  Attempting batch download...")
-    try:
-        raw_data = yf.download(
-            tickers,
-            period="60d",
-            interval="1h",
-            progress=False,
-            group_by='ticker' if len(tickers) > 1 else None,
-        )
-        
-        if not raw_data.empty:
-            print(f"  → Batch downloaded {len(raw_data)} rows")
-            # Debug: Show column structure
-            if isinstance(raw_data.columns, pd.MultiIndex):
-                print(f"  → MultiIndex columns. Levels: {raw_data.columns.names}")
-                sample_cols = raw_data.columns[:6].tolist()
-                print(f"  → Sample columns: {sample_cols}")
-            
-            # Extract each ticker
-            for ticker in tickers:
-                df = get_1h_ohlc(ticker, raw_data)
-                if not df.empty:
-                    ticker_data[ticker] = df
-            
-            print(f"  → Extracted {len(ticker_data)}/{len(tickers)} tickers from batch")
-    except Exception as e:
-        print(f"  ⚠️ Batch download failed: {e}")
-    
-    # Fall back to individual downloads for missing tickers
-    missing_tickers = [t for t in tickers if t not in ticker_data]
-    if missing_tickers:
-        print(f"  → Individual download for {len(missing_tickers)} missing tickers...")
-        for ticker in missing_tickers:
-            try:
-                df = yf.download(
-                    ticker,
-                    period="60d",
-                    interval="1h",
-                    progress=False,
-                )
-                if not df.empty:
-                    df = df[['Open', 'High', 'Low', 'Close']].dropna()
-                    if not df.empty:
-                        ticker_data[ticker] = df
-            except Exception as e:
-                print(f"    ⚠️ {ticker}: {e}")
-    
-    return ticker_data
-
-
-# ==========================================
-# 1H Data Archive Layer (Supabase)
-# ==========================================
-
-def archive_to_supabase(ticker_data, sb):
-    """
-    Upsert downloaded 1H OHLC data to ohlc_1h_archive table.
-    This accumulates data over time beyond Yahoo's 60-day limit.
-    """
-    total_rows = 0
-    for ticker, df in ticker_data.items():
-        if df.empty:
-            continue
-        
-        # Prepare rows for upsert
-        rows = []
-        for ts, row in df.iterrows():
-            # Normalize timestamp to naive UTC string
-            if hasattr(ts, 'tz') and ts.tz is not None:
-                ts_str = ts.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ')
-            else:
-                ts_str = ts.strftime('%Y-%m-%dT%H:%M:%SZ')
-            
-            rows.append({
-                'ticker': ticker,
-                'ts': ts_str,
-                'open': float(row['Open']),
-                'high': float(row['High']),
-                'low': float(row['Low']),
-                'close': float(row['Close']),
-            })
-        
-        # Batch upsert in chunks of 500
-        for i in range(0, len(rows), 500):
-            chunk = rows[i:i+500]
-            try:
-                sb.table('ohlc_1h_archive').upsert(chunk, on_conflict='ticker,ts').execute()
-                total_rows += len(chunk)
-            except Exception as e:
-                print(f"    ⚠️ Archive upsert failed for {ticker} (chunk {i}): {e}")
-    
-    return total_rows
-
-
-def load_from_archive(tickers, sb):
-    """
-    Load up to 1 year of 1H data from the archive table.
-    Uses pagination to bypass Supabase's 1000-row default limit.
-    Returns dict mapping ticker → DataFrame with OHLC columns.
-    """
-    cutoff = (datetime.utcnow() - timedelta(days=365)).strftime('%Y-%m-%dT%H:%M:%SZ')
-    archive_data = {}
-    PAGE_SIZE = 1000
-    
-    for ticker in tickers:
-        try:
-            all_records = []
-            offset = 0
-            
-            while True:
-                result = sb.table('ohlc_1h_archive') \
-                    .select('ts,open,high,low,close') \
-                    .eq('ticker', ticker) \
-                    .gte('ts', cutoff) \
-                    .order('ts') \
-                    .range(offset, offset + PAGE_SIZE - 1) \
-                    .execute()
-                
-                if not result.data:
-                    break
-                
-                all_records.extend(result.data)
-                
-                if len(result.data) < PAGE_SIZE:
-                    break  # Last page
-                
-                offset += PAGE_SIZE
-            
-            if all_records:
-                df = pd.DataFrame(all_records)
-                df['ts'] = pd.to_datetime(df['ts'], utc=True)
-                df = df.set_index('ts')
-                df.columns = ['Open', 'High', 'Low', 'Close']
-                df = df.astype(float)
-                archive_data[ticker] = df
-        except Exception as e:
-            # Silently skip — will fall back to Yahoo data
-            pass
-    
-    return archive_data
-
-
-def cleanup_old_archive(sb):
-    """
-    Delete archive rows older than 1 year.
-    Returns number of deleted rows.
-    """
-    cutoff = (datetime.utcnow() - timedelta(days=365)).strftime('%Y-%m-%dT%H:%M:%SZ')
-    try:
-        result = sb.table('ohlc_1h_archive') \
-            .delete() \
-            .lt('ts', cutoff) \
-            .execute()
-        deleted = len(result.data) if result.data else 0
-        return deleted
-    except Exception as e:
-        print(f"    ⚠️ Cleanup failed: {e}")
-        return 0
-
-
-def merge_ticker_data(yahoo_data, archive_data):
-    """
-    Merge Yahoo (fresh, 60-day) with archive (accumulated, up to 1 year).
-    Archive is the base; Yahoo data overwrites for the overlap period
-    (Yahoo is always fresher for recent bars).
-    """
-    merged = {}
-    all_tickers = set(list(yahoo_data.keys()) + list(archive_data.keys()))
-    
-    for ticker in all_tickers:
-        yahoo_df = yahoo_data.get(ticker, pd.DataFrame())
-        archive_df = archive_data.get(ticker, pd.DataFrame())
-        
-        if yahoo_df.empty and archive_df.empty:
-            continue
-        elif yahoo_df.empty:
-            merged[ticker] = archive_df
-        elif archive_df.empty:
-            merged[ticker] = yahoo_df
-        else:
-            # Combine: archive as base, Yahoo overwrites overlap
-            combined = pd.concat([archive_df, yahoo_df])
-            combined = combined[~combined.index.duplicated(keep='last')]  # Yahoo wins
-            combined = combined.sort_index()
-            merged[ticker] = combined
-    
-    return merged
-
-
-def compute_synthetic_ohlc(num_df, den_df, operation):
-    """
-    Compute synthetic OHLC from two instruments.
-    
-    For divide: OHLC = num / den
-    For multiply: OHLC = num * den
-    
-    Note: High/Low of synthetic pair is approximated since true tick-level
-    data isn't available. We use the max/min of all four combinations.
-    """
-    # Align on common index
-    idx = num_df.index.intersection(den_df.index)
-    if len(idx) == 0:
-        return pd.DataFrame()
-    
-    num = num_df.loc[idx]
-    den = den_df.loc[idx]
-    
-    if operation == 'divide':
-        # Synthetic Open/Close
-        s_open = num['Open'] / den['Open']
-        s_close = num['Close'] / den['Close']
-        # Approximate High/Low: max/min of OHLC combinations
-        combos = [
-            num['High'] / den['Low'],   # max numerator / min denominator
-            num['High'] / den['High'],
-            num['Low'] / den['Low'],
-            num['Low'] / den['High'],   # min numerator / max denominator
-        ]
-        s_high = pd.concat(combos, axis=1).max(axis=1)
-        s_low = pd.concat(combos, axis=1).min(axis=1)
-    else:  # multiply
-        s_open = num['Open'] * den['Open']
-        s_close = num['Close'] * den['Close']
-        combos = [
-            num['High'] * den['High'],
-            num['High'] * den['Low'],
-            num['Low'] * den['High'],
-            num['Low'] * den['Low'],
-        ]
-        s_high = pd.concat(combos, axis=1).max(axis=1)
-        s_low = pd.concat(combos, axis=1).min(axis=1)
-    
-    return pd.DataFrame({
-        'Open': s_open,
-        'High': s_high,
-        'Low': s_low,
-        'Close': s_close,
-    })
-
+SIGNAL_8H_SOURCE_STALE_AFTER_HOURS = int(
+    os.environ.get("SIGNAL_8H_SOURCE_STALE_AFTER_HOURS", str(SOURCE_STALE_AFTER_HOURS))
+)
 
 # ==========================================
 # Technical Indicator Functions
@@ -1026,10 +535,35 @@ def main():
     yahoo_data = download_1h_data(all_tickers)
     
     if not yahoo_data:
-        print("ERROR: No data returned from Yahoo Finance!")
+        print("WARNING: No fresh data returned from Yahoo Finance.")
+        print("  → The engine will publish explicit unavailable rows instead of leaving stale signals untouched.")
+        outage_results = {}
+        all_symbols = get_all_signal_symbols()
+        for symbol in all_symbols:
+            _, source_metadata, source_error = resolve_symbol_1h(
+                symbol,
+                {},
+                yahoo_data,
+                expected_close,
+                SIGNAL_8H_SOURCE_STALE_AFTER_HOURS,
+            )
+            outage_results[symbol] = make_unavailable_payload(
+                symbol,
+                "unavailable",
+                source_error or "source_outage",
+                source_metadata,
+            )
+
+        if sb:
+            print(f"  → Publishing {len(outage_results)} explicit outage rows to Supabase.")
+            pushed = push_signal_results(sb, outage_results)
+            print(f"  → Pushed {pushed} outage records to Supabase")
+            print("\nDone. ✅")
+        else:
+            print(json.dumps(outage_results, default=str, indent=2, ensure_ascii=False))
         return
-    
-    print(f"  → Yahoo data: {len(yahoo_data)} tickers")
+    else:
+        print(f"  → Yahoo data: {len(yahoo_data)} tickers")
     
     # 3. Freshness Gate — "Get then Push"
     if not is_manual:
@@ -1047,10 +581,12 @@ def main():
         archived_rows = archive_to_supabase(yahoo_data, sb)
         print(f"  → Archived {archived_rows} rows")
     
-    # 5. Load full archive (up to 1 year of accumulated data)
+    # 5. Load full archive. Stock indices only form about one valid 8H candle
+    # per trading day, so a one-year archive is not enough for the 369-SMA RSI
+    # first-wave module. The default retained depth is therefore 730 days.
     archive_data = {}
     if sb:
-        print(f"\nStep 3: Loading 1H archive from Supabase (up to 1 year)...")
+        print(f"\nStep 3: Loading 1H archive from Supabase (up to {ARCHIVE_RETENTION_DAYS} days)...")
         archive_data = load_from_archive(all_tickers, sb)
         print(f"  → Archive data: {len(archive_data)} tickers")
         if archive_data:
@@ -1069,43 +605,51 @@ def main():
     # 7. Process each symbol
     results = {}
     success_count = 0
-    skip_count = 0
+    unavailable_count = 0
     error_count = 0
     
-    all_symbols = list(YAHOO_TICKERS.keys()) + list(SYNTHETIC_PAIRS.keys())
+    all_symbols = get_all_signal_symbols()
     print(f"\nStep 4: Processing {len(all_symbols)} symbols on 8H timeframe...")
     
     for symbol in all_symbols:
         try:
-            # Get 1H OHLC from pre-downloaded ticker data
-            df_1h = pd.DataFrame()
-            if symbol in YAHOO_TICKERS:
-                ticker = YAHOO_TICKERS[symbol]
-                df_1h = ticker_data.get(ticker, pd.DataFrame())
-            else:
-                # Synthetic pair
-                num_ticker, den_ticker, operation = SYNTHETIC_PAIRS[symbol]
-                num_1h = ticker_data.get(num_ticker, pd.DataFrame())
-                den_1h = ticker_data.get(den_ticker, pd.DataFrame())
-                
-                if num_1h.empty or den_1h.empty:
-                    print(f"  ⚠️  {symbol}: Missing component data for synthetic pair")
-                    skip_count += 1
-                    continue
-                
-                df_1h = compute_synthetic_ohlc(num_1h, den_1h, operation)
+            # The resolver is the symbol-level warehouse clerk. It tells us
+            # exactly which ticker or synthetic component failed, so one bad
+            # instrument cannot disappear inside a giant loop.
+            df_1h, source_metadata, source_error = resolve_symbol_1h(
+                symbol,
+                ticker_data,
+                yahoo_data,
+                expected_close,
+                SIGNAL_8H_SOURCE_STALE_AFTER_HOURS,
+            )
             
-            if df_1h.empty:
-                print(f"  ⚠️  {symbol}: No 1H data available")
-                skip_count += 1
+            if source_error or df_1h.empty:
+                payload = make_unavailable_payload(
+                    symbol,
+                    "unavailable",
+                    source_error or "no_1h_data",
+                    source_metadata,
+                )
+                results[symbol] = payload
+                unavailable_count += 1
+                print(f"  ⚠️  {symbol}: Source unavailable ({payload['data_error']})")
                 continue
             
             # Synthesize 8H candles
             df_8h = synthesize_8h_candles(df_1h)
             
             if len(df_8h) < 50:
+                payload = make_unavailable_payload(
+                    symbol,
+                    "unavailable",
+                    f"not_enough_8h_candles:{len(df_8h)}",
+                    source_metadata,
+                    candles_count=len(df_8h),
+                )
+                results[symbol] = payload
+                unavailable_count += 1
                 print(f"  ⚠️  {symbol}: Not enough 8H candles ({len(df_8h)} < 50)")
-                skip_count += 1
                 continue
             
             s_close = df_8h['Close']
@@ -1140,7 +684,9 @@ def main():
                 "trend_status": trend_status,                   # 1 / -1 / 0 (数值版)
                 "fw_status": fw_status,                         # 1 / -1 / 0 (数值版)
                 "candles_count": len(df_8h),                    # 8H K线数量 (数据深度)
-                "last_update": datetime.utcnow().isoformat() + "Z",
+                "last_update": utc_now_iso(),
+                "data_status": "ok",
+                **source_metadata,
             }
             
             results[symbol] = payload
@@ -1150,47 +696,30 @@ def main():
         except Exception as e:
             print(f"  ❌ {symbol}: Error - {e}")
             traceback.print_exc()
+            results[symbol] = make_unavailable_payload(
+                symbol,
+                "unavailable",
+                f"engine_error:{e}",
+            )
             error_count += 1
     
     # 8. Summary
     print(f"\n{'=' * 60}")
-    print(f"Results: {success_count} success, {skip_count} skipped, {error_count} errors")
+    print(f"Results: {success_count} success, {unavailable_count} unavailable, {error_count} errors")
     print(f"{'=' * 60}")
     
     # 9. Push signals to Supabase
     if sb:
         print("\nStep 5: Pushing signal results to Supabase...")
         try:
-            for sym, data in results.items():
-                def clean_nan(obj):
-                    if isinstance(obj, (float, np.floating)):
-                        if np.isnan(obj) or np.isinf(obj):
-                            return 0.0
-                        return float(obj)
-                    if isinstance(obj, (int, np.integer)):
-                        return int(obj)
-                    if isinstance(obj, dict):
-                        return {k: clean_nan(v) for k, v in obj.items()}
-                    if isinstance(obj, list):
-                        return [clean_nan(i) for i in obj]
-                    if isinstance(obj, bool):
-                        return obj
-                    return obj
-                
-                clean_data = clean_nan(data)
-                sb.table('signal_8h').upsert({
-                    'symbol': sym,
-                    'data': clean_data,
-                    'updated_at': datetime.utcnow().isoformat() + "Z"
-                }).execute()
-            
-            print(f"  → Pushed {len(results)} records to Supabase")
+            pushed = push_signal_results(sb, results)
+            print(f"  → Pushed {pushed} records to Supabase")
         except Exception as e:
             print(f"  ❌ Supabase push failed: {e}")
             traceback.print_exc()
         
-        # 10. Cleanup — delete archive data older than 1 year
-        print("\nStep 6: Cleaning up old archive data (>1 year)...")
+        # 10. Cleanup — keep enough depth for slow-session symbols such as indices.
+        print(f"\nStep 6: Cleaning up old archive data (>{ARCHIVE_RETENTION_DAYS} days)...")
         deleted = cleanup_old_archive(sb)
         print(f"  → Deleted {deleted} old rows")
         

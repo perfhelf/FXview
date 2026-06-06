@@ -1,8 +1,7 @@
-name: Update GodView Data
+name: Manual GodView Emergency Run
 
 on:
-  schedule:
-    - cron: '0 */4 * * *' # Every 4 hours
+  # Emergency-only: recurring provider updates live outside GitHub Actions.
   workflow_dispatch:
 
 jobs:
