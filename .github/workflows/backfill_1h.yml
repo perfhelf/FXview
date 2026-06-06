@@ -1,7 +1,8 @@
 name: Backfill 1H Archive
 
 on:
-  workflow_dispatch: # Manual trigger only
+  # Emergency-only: this must never become a scheduled data writer.
+  workflow_dispatch:
 
 jobs:
   backfill:

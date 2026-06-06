@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { supabase } from '@/lib/supabase'
+import { getSupabaseClient } from '@/lib/supabase'
 import { useTheme } from './providers'
 
 // ==========================================
@@ -501,6 +501,14 @@ export default function Home() {
 
   useEffect(() => {
     async function fetchData() {
+      const supabase = getSupabaseClient()
+
+      if (!supabase) {
+        console.warn('Supabase configuration missing; GodView snapshot is unavailable.')
+        setLoading(false)
+        return
+      }
+
       const { data: rows, error } = await supabase
         .from('godview_snapshot')
         .select('*')
