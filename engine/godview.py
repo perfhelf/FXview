@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 from supabase import create_client, Client
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # ==========================================
 # Configuration
@@ -30,6 +30,7 @@ SYMBOLS_MAP = {
     'XAG': 'SI=F',
     'USO': 'CL=F',
     'XCU': 'HG=F',
+    'WHEAT': 'ZW=F',
     'ZAR': 'USDZAR=X',
     'KRW': 'USDKRW=X',
     'BRL': 'USDBRL=X',
@@ -116,6 +117,7 @@ def calc_synthetic_indices(data):
     xag = get_c(SYMBOLS_MAP['XAG'])
     uso = get_c(SYMBOLS_MAP['USO'])
     xcu = get_c(SYMBOLS_MAP['XCU'])
+    wheat = get_c(SYMBOLS_MAP['WHEAT'])
     zar = get_c(SYMBOLS_MAP['ZAR'])
     krw = get_c(SYMBOLS_MAP['KRW'])
     brl = get_c(SYMBOLS_MAP['BRL'])
@@ -160,6 +162,9 @@ def calc_synthetic_indices(data):
     indices['XAG'] = xag/85.23 + (xag/eur)/73.16 + (xag/gbp)/63.41 + (xag*jpy)/13517 + (xag/aud)/127.59
     indices['USO'] = uso/93 + (uso/eur)/79.38 + (uso/gbp)/68.9 + (uso*jpy)/14832 + (uso/aud)/129.92
     indices['XCU'] = xcu/6.05 + (xcu/eur)/5.19 + (xcu/gbp)/4.50 + (xcu*jpy)/959.5 + (xcu/aud)/9.06
+    # WEB owns WHEAT as a tradable commodity. GodView only supplies the
+    # matching material row so web/mac consumers can display it.
+    indices['WHEAT'] = wheat/650 + (wheat/eur)/696 + (wheat/gbp)/825 + (wheat*jpy)/92950 + (wheat/aud)/985
     indices['ZAR'] = (1/zar)/0.06109 + (eur/zar)/0.07116 + (gbp/zar)/0.08210 + (jpy/zar)/9.688 + (aud/zar)/0.04080
     indices['KRW'] = (1/krw)/0.000682 + (eur/krw)/0.000794 + (gbp/krw)/0.000916 + (jpy/krw)/0.10818 + (aud/krw)/0.000455
     indices['BRL'] = (1/brl)/0.1858 + (eur/brl)/0.2165 + (gbp/brl)/0.2498 + (jpy/brl)/29.47 + (aud/brl)/0.1241
@@ -651,6 +656,7 @@ def main():
         xag = series_getter(SYMBOLS_MAP['XAG'])
         uso = series_getter(SYMBOLS_MAP['USO'])
         xcu = series_getter(SYMBOLS_MAP['XCU'])
+        wheat = series_getter(SYMBOLS_MAP['WHEAT'])
         zar = series_getter(SYMBOLS_MAP['ZAR'])
         krw = series_getter(SYMBOLS_MAP['KRW'])
         brl = series_getter(SYMBOLS_MAP['BRL'])
@@ -695,6 +701,9 @@ def main():
         res['XAG'] = xag/85.23 + (xag/eur)/73.16 + (xag/gbp)/63.41 + (xag*jpy)/13517 + (xag/aud)/127.59
         res['USO'] = uso/93 + (uso/eur)/79.38 + (uso/gbp)/68.9 + (uso*jpy)/14832 + (uso/aud)/129.92
         res['XCU'] = xcu/6.05 + (xcu/eur)/5.19 + (xcu/gbp)/4.50 + (xcu*jpy)/959.5 + (xcu/aud)/9.06
+        # Keep this formula aligned with the web display formula. The web app
+        # decides WHEAT's group membership; this engine only publishes data.
+        res['WHEAT'] = wheat/650 + (wheat/eur)/696 + (wheat/gbp)/825 + (wheat*jpy)/92950 + (wheat/aud)/985
         res['ZAR'] = (1/zar)/0.06109 + (eur/zar)/0.07116 + (gbp/zar)/0.08210 + (jpy/zar)/9.688 + (aud/zar)/0.04080
         res['KRW'] = (1/krw)/0.000682 + (eur/krw)/0.000794 + (gbp/krw)/0.000916 + (jpy/krw)/0.10818 + (aud/krw)/0.000455
         res['BRL'] = (1/brl)/0.1858 + (eur/brl)/0.2165 + (gbp/brl)/0.2498 + (jpy/brl)/29.47 + (aud/brl)/0.1241
@@ -738,7 +747,7 @@ def main():
         # Dynamic minimum length check
         # Commodities and Emerging currencies might have shorter history in Yahoo
         min_len = 200
-        if symbol in ['XAU', 'XAG', 'USO', 'XCU', 'ZAR', 'KRW', 'BRL',
+        if symbol in ['XAU', 'XAG', 'USO', 'XCU', 'WHEAT', 'ZAR', 'KRW', 'BRL',
                        'CN50', 'HK50', 'SG30', 'ASX200', 'CA60', 'NL25', 'FRA40', 'GER40',
                        'EUSTX50', 'IT40', 'SWI20', 'UK100', 'SPX500', 'NDQ100', 'US2000', 'US30', 'JPN225']:
             min_len = 50
@@ -839,7 +848,7 @@ def main():
         
         payload = {
             "symbol": symbol,
-            "last_update": datetime.utcnow().isoformat() + "Z", # Explicit UTC timestamp in payload
+            "last_update": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "trend_status": trend_status,
             "fw_status": fw_status,
             "ema_slopes": {
@@ -880,7 +889,7 @@ def main():
             sb.table('godview_snapshot').upsert({
                 'symbol': sym, 
                 'data': clean_data,
-                'updated_at': datetime.utcnow().isoformat() + "Z" # Explicit UTC for SQL column
+                'updated_at': datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             }).execute()
         print("Done.")
     else:

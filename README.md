@@ -8,7 +8,8 @@ Web 版本的 GodView 仪表盘，使用 100% 免费技术栈实现。
 - **数据库**: Supabase (PostgreSQL)
 - **数据源**: Yahoo Finance (via yfinance)
 - **计算引擎**: Python + pandas_ta
-- **定时任务**: GitHub Actions (每小时更新)
+- **正式轮询**: cron-job.org / 独立调度器调用 HTTP 或 worker 入口
+- **应急补跑**: GitHub Actions 仅保留 `workflow_dispatch`，不能再作为定时写库方案
 - **部署**: Vercel
 
 ## 项目结构
@@ -27,7 +28,7 @@ FXview/
 │   └── godview_schema.sql  # 数据库建表语句
 └── .github/
     └── workflows/
-        └── update_godview.yml  # GitHub Actions 定时任务
+        └── update_godview.yml  # 手动应急补跑，不做定时写库
 ```
 
 ## 部署步骤
@@ -47,9 +48,9 @@ NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-### 3. GitHub Secrets
+### 3. Cron / Service Secrets
 
-在你的 GitHub 仓库中添加以下 Secrets：
+正式数据更新由独立 Cron 或 worker 触发，运行环境需要以下变量：
 
 - `SUPABASE_URL`: Supabase Project URL
 - `SUPABASE_SERVICE_ROLE_KEY`: Supabase Service Role Key (用于写入数据)
@@ -62,7 +63,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 
 ### 5. 手动触发首次数据更新
 
-在 GitHub Actions 中手动运行 "Update GodView Data" workflow，填充初始数据。
+优先用正式 Cron/worker 入口触发。GitHub Actions 里的 workflow 只用于紧急手动补跑，不能重新加 `schedule`。
 
 ## 本地开发
 
