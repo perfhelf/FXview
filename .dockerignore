@@ -1,0 +1,14 @@
+.DS_Store
+.git
+.venv
+__pycache__
+*.pyc
+frontend/.next
+frontend/.open-next
+frontend/node_modules
+frontend/npm-debug.log*
+node_modules
+provider/node_modules
+provider/.wrangler
+provider/dist
+provider/npm-debug.log*

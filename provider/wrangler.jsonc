@@ -1,0 +1,41 @@
+{
+  "$schema": "../frontend/node_modules/wrangler/config-schema.json",
+  "name": "fxview-provider",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-09",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": true,
+  "triggers": {
+    "crons": [
+      "35 * * * *",
+      "20 */4 * * *"
+    ]
+  },
+  "containers": [
+    {
+      "class_name": "FxviewProviderContainer",
+      "image": "./Dockerfile",
+      "image_build_context": "..",
+      "max_instances": 1,
+      "instance_type": "standard-1"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "FxviewProviderContainer",
+        "name": "FXVIEW_PROVIDER_CONTAINER"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "FxviewProviderContainer"
+      ]
+    }
+  ]
+}

@@ -15,7 +15,7 @@ for select
 to anon
 using (true);
 
--- Allow service role full access (for updates from GitHub Actions)
+-- Allow service role full access for provider updates
 create policy "Allow service role full access"
 on public.signal_8h
 for all

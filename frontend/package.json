@@ -4,26 +4,30 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "npx -y node@24 node_modules/next/dist/bin/next build",
+    "cf:build": "npx -y node@24 node_modules/@opennextjs/cloudflare/dist/cli/index.js build",
+    "cf:deploy": "npx -y node@24 node_modules/@opennextjs/cloudflare/dist/cli/index.js build && CI=1 npx -y node@24 node_modules/wrangler/bin/wrangler.js deploy --config wrangler.jsonc --keep-vars --strict --experimental-autoconfig=false",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.90.1",
     "clsx": "^2.1.1",
-    "next": "16.1.1",
-    "react": "19.2.3",
-    "react-dom": "19.2.3",
+    "next": "^16.2.7",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "^1.19.11",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.1.1",
+    "eslint-config-next": "^16.2.7",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "^4.98.0"
   }
 }

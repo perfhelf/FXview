@@ -35,8 +35,8 @@
     └────────────────────────────────────────────────────────────────────────┘
 
 运行方式 / Execution:
-    正式轮询必须由 cron-job.org 或独立 worker 唤醒 HTTP/worker 入口；
-    GitHub Actions 只保留 emergency workflow_dispatch，不再承担定时写库。
+    正式轮询由 Cloudflare Worker Cron 唤醒 Provider；
+    Provider Container 运行本文件并写入 Supabase。
     Scheduled runs keep a freshness gate so old bars cannot be republished as
     fresh data. Manual emergency runs bypass only the market-wide gate; each
     symbol still publishes explicit source status.
@@ -513,8 +513,8 @@ def main():
     print(f"Run Time: {datetime.utcnow().isoformat()}Z")
     print("=" * 60)
     
-    # Check if manual trigger (bypass freshness gate)
-    is_manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    provider_source = os.environ.get("PROVIDER_RUN_SOURCE", "")
+    is_manual = provider_source == "manual"
     
     # Show expected 8H window
     expected_close, bucket_start = get_expected_8h_close()

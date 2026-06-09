@@ -1,0 +1,19 @@
+{
+  "name": "fxview-provider",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "deploy": "wrangler deploy --config wrangler.jsonc --keep-vars --strict --experimental-autoconfig=false",
+    "dry-run": "wrangler deploy --config wrangler.jsonc --dry-run --containers-rollout none --strict --experimental-autoconfig=false"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.3.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260609.0",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.98.0"
+  }
+}

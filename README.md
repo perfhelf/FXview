@@ -1,6 +1,6 @@
 # FXView - 全球汇率上帝视角
 
-Web 版本的 GodView 仪表盘，使用 100% 免费技术栈实现。
+Web 版本的 GodView 仪表盘。前端运行在 Cloudflare OpenNext，数据计算由 Cloudflare Worker + Container 调度现有 Python 引擎写入 Supabase。
 
 ## 技术栈
 
@@ -8,9 +8,9 @@ Web 版本的 GodView 仪表盘，使用 100% 免费技术栈实现。
 - **数据库**: Supabase (PostgreSQL)
 - **数据源**: Yahoo Finance (via yfinance)
 - **计算引擎**: Python + pandas_ta
-- **正式轮询**: cron-job.org / 独立调度器调用 HTTP 或 worker 入口
-- **应急补跑**: GitHub Actions 仅保留 `workflow_dispatch`，不能再作为定时写库方案
-- **部署**: Vercel
+- **正式轮询**: Cloudflare Worker Cron
+- **计算容器**: Cloudflare Containers
+- **部署**: Cloudflare Workers / OpenNext
 
 ## 项目结构
 
@@ -19,16 +19,20 @@ FXview/
 ├── frontend/           # Next.js 前端应用
 │   ├── app/
 │   │   ├── layout.tsx
-│   │   └── page.tsx    # 主页面 (GodView 表格)
+│   │   └── page.tsx
+│   ├── components/
+│   │   └── godview/
 │   └── lib/
 │       └── supabase.ts # Supabase 客户端
 ├── engine/             # Python 计算引擎
 │   ├── godview.py      # 核心计算逻辑
 │   ├── requirements.txt
 │   └── godview_schema.sql  # 数据库建表语句
-└── .github/
-    └── workflows/
-        └── update_godview.yml  # 手动应急补跑，不做定时写库
+└── provider/           # Cloudflare Worker + Container 调度层
+    ├── src/index.ts
+    ├── container/runner.py
+    ├── Dockerfile
+    └── wrangler.jsonc
 ```
 
 ## 部署步骤
@@ -50,20 +54,30 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 
 ### 3. Cron / Service Secrets
 
-正式数据更新由独立 Cron 或 worker 触发，运行环境需要以下变量：
+正式数据更新由 Cloudflare Worker Cron 触发，Provider 运行环境需要以下变量：
 
 - `SUPABASE_URL`: Supabase Project URL
 - `SUPABASE_SERVICE_ROLE_KEY`: Supabase Service Role Key (用于写入数据)
+- `PROVIDER_RUN_SECRET`: 手动触发 Provider 时使用的鉴权密钥
 
-### 4. Vercel 部署
+### 4. Cloudflare 部署
 
-1. 将 `frontend` 目录设置为 Vercel 项目的 Root Directory
-2. 在 Vercel 中配置环境变量 (同 .env.local)
-3. 绑定自定义域名 `fxview.xuebz.com`
+```bash
+cd frontend
+npm run cf:build
+npm run cf:deploy
 
-### 5. 手动触发首次数据更新
+cd ../provider
+npm run deploy
+```
 
-优先用正式 Cron/worker 入口触发。GitHub Actions 里的 workflow 只用于紧急手动补跑，不能重新加 `schedule`。
+### 5. 手动触发数据更新
+
+Provider 支持以下手动入口，需携带 `Authorization: Bearer <PROVIDER_RUN_SECRET>`：
+
+- `POST /run/godview`
+- `POST /run/signal-8h`
+- `POST /run/all`
 
 ## 本地开发
 
@@ -77,4 +91,10 @@ npm run dev
 cd engine
 pip install -r requirements.txt
 python godview.py
+
+# Provider
+cd ../provider
+npm install
+npm run typecheck
+npm run dry-run
 ```

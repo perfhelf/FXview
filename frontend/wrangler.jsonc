@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fxview-xuebz",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-06-09",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "nodejs_compat_populate_process_env",
+    "global_fetch_strictly_public"
+  ],
+  "workers_dev": true,
+  "placement": {
+    "mode": "smart"
+  },
+  "routes": [
+    {
+      "pattern": "fxview.xuebz.com/*",
+      "zone_name": "xuebz.com"
+    }
+  ],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  }
+}
